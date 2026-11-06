@@ -318,6 +318,20 @@ export const ConfiguracoesView: React.FC<{
               className="lg:col-span-3"
             />
 
+            <Texto
+              rotulo="Inscrição municipal (itens de serviço)"
+              value={config.geral.inscricaoMunicipal}
+              onChange={(e) => alterar('geral', 'inscricaoMunicipal', e.target.value)}
+              className="lg:col-span-3"
+            />
+            <Texto
+              rotulo="CNAE fiscal"
+              inputMode="numeric"
+              value={config.geral.cnae}
+              onChange={(e) => alterar('geral', 'cnae', e.target.value.replace(/\D/g, '').slice(0, 7))}
+              className="lg:col-span-3"
+            />
+
             <div className="lg:col-span-12 grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
               <Toggle
                 checked={config.geral.atualizarXML}

@@ -255,6 +255,145 @@ async function principal() {
     assert.ok(r.valido, semErros(r));
   });
 
+  // --- Tributos: cada grupo novo tem de passar no XSD e fechar os totais -----
+
+  const validarAssinando = async (c: Contexto, doc: any) => {
+    const nota = gerarNFe(c, doc);
+    const r = await validarNFe(assinar(semDeclaracao(nota.xml), 'infNFe', `NFe${nota.chave}`, c.certificado));
+    assert.ok(r.valido, semErros(r));
+    return nota;
+  };
+  const item = (imposto: any, extra: any = {}) => ({
+    codigo: 'P1', descricao: 'Produto', ncm: '84713012', cfop: '5102', unidade: 'UN',
+    quantidade: 1, valorUnitario: 100, ...extra,
+    imposto: { origem: 0, pis: { cst: '07' }, cofins: { cst: '07' }, ...imposto },
+  });
+  const ibscbs = { cst: '000', classificacao: '000001', aliquotaIBSUF: 0.1, aliquotaIBSMun: 0, aliquotaCBS: 0.9 };
+
+  await conferir('regime normal: FCP, ST, desoneração, diferimento, IPI, II, PIS/COFINS e IBS/CBS no XSD', async () => {
+    const nota = await validarAssinando(ctx, {
+      ...documento,
+      ide: { ...documento.ide, consumidorFinal: 0 },
+      destinatario: { ...documento.destinatario, indIEDest: 1, inscricaoEstadual: '111111111111' },
+      itens: [
+        item({ cst: '00', aliquota: 18, aliquotaFCP: 2, ipi: { cst: '50', aliquota: 10 },
+          pis: { cst: '01', aliquota: 1.65 }, cofins: { cst: '01', aliquota: 7.6 }, ibscbs, valorAproximadoTributos: 30 }),
+        item({ cst: '10', aliquota: 18, mvaST: 40, aliquotaST: 18, aliquotaFCPST: 2, ibscbs }),
+        item({ cst: '20', aliquota: 18, reducaoBC: 10, valorDesonerado: 1.8, motivoDesoneracao: 9, deduzDesoneracao: true }),
+        item({ cst: '30', aliquota: 12, mvaST: 30, aliquotaST: 18, valorDesonerado: 5, motivoDesoneracao: 9 }),
+        item({ cst: '40', valorDesonerado: 18, motivoDesoneracao: 9 }),
+        item({ cst: '51', aliquota: 18, percentualDiferimento: 33.33 }),
+        item({ cst: '60', baseSTRetido: 100, aliquotaSTRetido: 18, valorSTRetido: 18 }),
+        item({ cst: '70', aliquota: 18, reducaoBC: 20, mvaST: 40, aliquotaST: 18 }),
+        item({ cst: '90', aliquota: 18, aliquotaST: 18, mvaST: 30 }),
+        item({ cst: '00', aliquota: 18, ii: { base: 100, despesasAduaneiras: 5, valor: 10, iof: 0 } }, { cfop: '5102' }),
+        item({ cst: '41', ibscbs: { ...ibscbs, cst: '200', reducao: 60 } }),
+        item({ cst: '41', ibscbs: { ...ibscbs, cst: '510', diferimento: 100 } }),
+        item({ cst: '41', ibscbs: { cst: '410', classificacao: '410001' } }),
+      ],
+    });
+    const t = nota.totais;
+    assert.strictEqual(t.vICMS, 114.6); // 18 + 18 + 16,20 + 12,00 (51 com 1/3 diferido) + 14,40 + 18 + 18
+    assert.strictEqual(t.vIPI, 10);
+    assert.strictEqual(t.vII, 10);
+    assert.strictEqual(t.vFCP, 2);
+    assert.strictEqual(t.vICMSDeson, 24.8);
+    // vNF = produtos - desonerado deduzido + ST + FCP-ST + IPI + II
+    assert.strictEqual(t.vNF, Number((1300 - 1.8 + t.vST + t.vFCPST + 10 + 10).toFixed(2)));
+    assert.ok(nota.xml.includes('<IBSCBSTot>'), 'faltou o total do IBS/CBS');
+    assert.ok(nota.xml.includes('<gRed><pRedAliq>60.0000</pRedAliq>'), 'faltou a redução do IBS/CBS');
+    assert.ok(nota.xml.includes('<vTotTrib>30.00</vTotTrib>'));
+  });
+
+  await conferir('Simples Nacional: CSOSN 101, 201, 202, 500 e 900 no XSD', async () => {
+    const ctxSN = contexto('55');
+    ctxSN.emitente = { ...ctxSN.emitente, crt: 1 };
+    const nota = await validarAssinando(ctxSN, {
+      ...documento,
+      itens: [
+        item({ csosn: '101', aliquotaCredito: 2.5 }),
+        item({ csosn: '201', aliquota: 18, mvaST: 40, aliquotaST: 18, aliquotaCredito: 2.5 }),
+        item({ csosn: '202', aliquota: 18, mvaST: 40, aliquotaST: 18, aliquotaFCPST: 2 }),
+        item({ csosn: '500', baseSTRetido: 100, aliquotaSTRetido: 18, valorSTRetido: 18 }),
+        item({ csosn: '900', aliquota: 18, aliquotaST: 18, mvaST: 30, aliquotaCredito: 1 }),
+      ],
+    });
+    assert.ok(nota.xml.includes('<ICMSSN201>'), 'o CSOSN 201 tem grupo próprio');
+    assert.ok(nota.xml.includes('<ICMSSN202><orig>0</orig><CSOSN>202</CSOSN>'));
+    // 201: ST = 140 x 18% - 18 = 7,20
+    assert.ok(nota.xml.includes('<vBCST>140.00</vBCST><pICMSST>18.0000</pICMSST><vICMSST>7.20</vICMSST>'));
+  });
+
+  await conferir('DIFAL: interestadual a não contribuinte leva ICMSUFDest', async () => {
+    const paraRJ = {
+      ...documento,
+      destinatario: { ...documento.destinatario, endereco: { ...documento.destinatario.endereco, uf: 'RJ', codigoMunicipio: '3304557' } },
+    };
+    assert.throws(() => gerarNFe(ctx, { ...paraRJ, itens: [item({ cst: '00', aliquota: 12 }, { cfop: '6102' })] } as any), /694/);
+    const nota = await validarAssinando(ctx, {
+      ...paraRJ,
+      itens: [item({ cst: '00', aliquota: 12, difal: { aliquotaInterna: 20, aliquotaFCP: 2 } }, { cfop: '6102' })],
+    });
+    assert.ok(nota.xml.includes('<idDest>2</idDest>'), 'o destino devia sair da UF do destinatário');
+    assert.strictEqual(nota.totais.vICMSUFDest, 8);
+    assert.strictEqual(nota.totais.vFCPUFDest, 2);
+  });
+
+  await conferir('serviço: ISSQN no lugar do ICMS, ISSQNtot e inscrição municipal', async () => {
+    const servico = { ...documento, itens: [item({ issqn: { aliquota: 5, codigoServico: '01.01' }, ibscbs })] };
+    assert.throws(() => gerarNFe(ctx, servico as any), /inscrição municipal/);
+    const ctxServ = contexto('55');
+    ctxServ.config.geral = { ...ctxServ.config.geral, inscricaoMunicipal: '12345', cnae: '6201501' };
+    const nota = await validarAssinando(ctxServ, servico);
+    assert.ok(!nota.xml.includes('<ICMS>'), 'item de serviço não leva ICMS');
+    assert.strictEqual(nota.totais.vServ, 100);
+    assert.strictEqual(nota.totais.vProd, 0);
+    assert.strictEqual(nota.totais.vNF, 100);
+    assert.ok(nota.xml.includes('<vISS>5.00</vISS>'));
+  });
+
+  await conferir('importação: DI com adição no prod, junto do II', async () => {
+    const di = {
+      numero: '2412345678', data: '2026-09-01', localDesembaraco: 'PORTO DE SANTOS', ufDesembaraco: 'SP',
+      dataDesembaraco: '2026-09-05', viaTransporte: 1, afrmm: 25, intermedio: 1, codigoExportador: 'EXP001',
+      adicoes: [{ numero: 1, sequencia: 1, fabricante: 'FAB001' }],
+    };
+    const nota = await validarAssinando(ctx, {
+      ...documento,
+      ide: { ...documento.ide, tipoDocumento: 0, consumidorFinal: 0, idDestino: 3 },
+      itens: [item({ cst: '00', aliquota: 18, ii: { base: 100, despesasAduaneiras: 5, valor: 10, iof: 0 } }, { cfop: '3102', di })],
+    });
+    assert.ok(nota.xml.includes('<indTot>1</indTot><DI><nDI>2412345678</nDI>'), 'o DI vem logo depois do indTot');
+    assert.ok(nota.xml.includes('<adi><nAdicao>1</nAdicao><nSeqAdic>1</nSeqAdic><cFabricante>FAB001</cFabricante></adi>'));
+  });
+
+  await conferir('monofasia: ICMS 02, 15, 53 e 61 com combustível, e IBS/CBS 620', async () => {
+    const comb = { combustivel: { codigoANP: '320102001', descricaoANP: 'GASOLINA C COMUM' }, quantidade: 100, valorUnitario: 6 };
+    const mono = { cst: '620', classificacao: '620001', monofasia: { adRemIBS: 0.1, adRemCBS: 0.9, valorIBSRetido: 1 } };
+    assert.throws(() => gerarNFe(ctx, { ...documento, itens: [item({ cst: '02', adRemICMS: 1.47 })] } as any), /ANP/);
+    const nota = await validarAssinando(ctx, {
+      ...documento,
+      itens: [
+        item({ cst: '02', adRemICMS: 1.47, ibscbs: mono }, comb),
+        item({ cst: '15', adRemICMS: 1.47, adRemICMSReten: 0.5, reducaoAdRem: 10, motivoReducaoAdRem: 9 }, comb),
+        item({ cst: '53', adRemICMS: 1.47, percentualDiferimento: 50 }, comb),
+        item({ cst: '61', adRemICMSRet: 1.47, ibscbs: { ...mono, monofasia: { valorIBSRetido: 2, valorCBSRetido: 3 } } }, comb),
+      ],
+    });
+    const t = nota.totais;
+    assert.strictEqual(t.qBCMono, 300);
+    assert.strictEqual(t.vICMSMono, 147 + 147 + 73.5);
+    assert.strictEqual(t.vICMSMonoReten, 50);
+    assert.strictEqual(t.vICMSMonoRet, 147);
+    assert.strictEqual(t.vIBSMono, 10);
+    assert.strictEqual(t.vCBSMono, 90);
+    assert.strictEqual(t.vIBSMonoRet, 3);
+    assert.ok(nota.xml.includes('<comb><cProdANP>320102001</cProdANP>'));
+    assert.ok(nota.xml.includes('<gMono>'), 'faltou o total da monofasia do IBS/CBS');
+    // o ICMS monofásico já está no preço: não soma no total da nota
+    assert.strictEqual(t.vNF, 2400);
+  });
+
   await conferir('NCM inválido é barrado, apontando o campo', async () => {
     const r = await validarNFe(assinado.replace('<NCM>84713012</NCM>', '<NCM>8471301</NCM>'));
     assert.ok(!r.valido, 'NCM com 7 dígitos não podia passar');

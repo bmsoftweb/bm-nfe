@@ -30,6 +30,8 @@ export type NomeServico =
   | 'NFeDistribuicaoDFe';
 
 export const VERSAO_LAYOUT = '4.00';
+/** Versão do QR-Code da NFC-e, que também escolhe a URL de consulta no .ini */
+export const VERSAO_QRCODE = 2;
 const NS_WSDL = 'http://www.portalfiscal.inf.br/nfe/wsdl/';
 
 export interface ServicoResolvido {
@@ -187,8 +189,41 @@ export function ufPorCodigo(codigo: number | string): string {
   return Object.keys(CODIGO_UF).find((uf) => CODIGO_UF[uf] === n) || '';
 }
 
+/**
+ * Mesma regra do LerServicoChaveDeParams do ACBr: procura a chave na versão
+ * pedida, cai para a maior versão inferior publicada e só usa a chave sem
+ * sufixo quando não existe nenhuma versionada. Em SP, por exemplo, a chave sem
+ * sufixo ainda aponta para as páginas .aspx antigas e só a _1.00 traz a URL
+ * curta — que é a única que cabe no limite de 85 caracteres do urlChave.
+ */
+function valorChaveVersionada(
+  secao: Record<string, string>,
+  chave: string,
+  versao: number,
+): string | undefined {
+  const base = `${chave.toLowerCase()}_`;
+  let melhor = 0;
+  let achada: string | undefined;
+
+  for (const k of Object.keys(secao)) {
+    if (!k.toLowerCase().startsWith(base)) continue;
+    const v = Number(k.slice(base.length));
+    if (v > melhor && v <= versao) {
+      melhor = v;
+      achada = secao[k];
+    }
+  }
+
+  return achada ?? valorChave(secao, chave);
+}
+
 /** URL de consulta pública da NF-e/NFC-e e do QR-Code, usadas no DANFE */
-export function urlsConsulta(modelo: ModeloDFe, uf: string, ambiente: Ambiente) {
+export function urlsConsulta(
+  modelo: ModeloDFe,
+  uf: string,
+  ambiente: Ambiente,
+  versaoQrCode = VERSAO_QRCODE,
+) {
   const secoes = lerSecoes();
   const sufixo = ambiente === 1 ? 'P' : 'H';
   let sessao = `${modelo}_${uf.toUpperCase()}_${sufixo}`;
@@ -197,8 +232,9 @@ export function urlsConsulta(modelo: ModeloDFe, uf: string, ambiente: Ambiente) 
   while (secoes[sessao] && !visitadas.includes(sessao)) {
     visitadas.push(sessao);
     const secao = secoes[sessao];
-    const qrCode = valorChave(secao, 'URL-QRCode');
-    const consulta = valorChave(secao, modelo === 'NFe' ? 'URL-ConsultaNFe' : 'URL-ConsultaNFCe');
+    const chaveConsulta = modelo === 'NFe' ? 'URL-ConsultaNFe' : 'URL-ConsultaNFCe';
+    const qrCode = valorChaveVersionada(secao, 'URL-QRCode', versaoQrCode);
+    const consulta = valorChaveVersionada(secao, chaveConsulta, versaoQrCode);
     if (qrCode || consulta) return { qrCode: qrCode || '', consulta: consulta || '' };
     const usar = valorChave(secao, 'Usar');
     if (!usar) break;

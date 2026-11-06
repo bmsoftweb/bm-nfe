@@ -38,6 +38,8 @@ export interface ConfigNFe {
     respTecContato: string;
     respTecEmail: string;
     respTecFone: string;
+    inscricaoMunicipal: string;
+    cnae: string;
     versaoQRCode: number;
     atualizarXML: boolean;
     exibirErroSchema: boolean;

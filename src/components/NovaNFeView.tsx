@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Plus, Save, Send, Trash2 } from 'lucide-react';
 import * as api from '../services/api';
-import { Meta } from '../types';
+import { Emitente, Meta } from '../types';
 import { ALTURA_CONTROLE, Area, Botao, Campo, Confirmacao, Faixa, Secao, Selecao, Texto, Vazio } from './ui';
 import { Toggle } from './Toggle';
 import { NumberField } from './NumberField';
 import { DateField } from './DateField';
 import { PainelRespostas, useOperacao } from './PainelRespostas';
 import { formatarChave, formatarMoeda } from '../utils/formatters';
+import { TRIBUTOS_PADRAO, Tributos, TributosItem, lerTributos, montarTributos } from './TributosItem';
 
 /**
  * "Criar e Enviar" do exemplo Delphi: monta a nota, gera e assina o XML e, se
@@ -23,15 +24,11 @@ interface ItemForm {
   unidade: string;
   quantidade: string;
   valorUnitario: string;
-  origem: string;
-  cst: string;
-  csosn: string;
-  aliquotaICMS: string;
-  cstPis: string;
-  cstCofins: string;
+  /** Tributos pelo caminho em `imposto` (ver TributosItem) */
+  trib: Tributos;
 }
 
-const ITEM_VAZIO: ItemForm = {
+const novoItem = (): ItemForm => ({
   codigo: '',
   descricao: '',
   ncm: '',
@@ -39,13 +36,8 @@ const ITEM_VAZIO: ItemForm = {
   unidade: 'UN',
   quantidade: '1.0000',
   valorUnitario: '0.00',
-  origem: '0',
-  cst: '00',
-  csosn: '102',
-  aliquotaICMS: '0.0000',
-  cstPis: '07',
-  cstCofins: '07',
-};
+  trib: { ...TRIBUTOS_PADRAO },
+});
 
 const hoje = () => {
   const d = new Date();
@@ -109,18 +101,13 @@ function valoresIniciais(dados?: any) {
           codigo: texto(i.codigo),
           descricao: texto(i.descricao),
           ncm: texto(i.ncm),
-          cfop: texto(i.cfop, ITEM_VAZIO.cfop),
-          unidade: texto(i.unidade, ITEM_VAZIO.unidade),
-          quantidade: decimal(i.quantidade, 4, ITEM_VAZIO.quantidade),
-          valorUnitario: decimal(i.valorUnitario, 2, ITEM_VAZIO.valorUnitario),
-          origem: texto(i.imposto?.origem, ITEM_VAZIO.origem),
-          cst: texto(i.imposto?.cst, ITEM_VAZIO.cst),
-          csosn: texto(i.imposto?.csosn, ITEM_VAZIO.csosn),
-          aliquotaICMS: decimal(i.imposto?.aliquota, 4, ITEM_VAZIO.aliquotaICMS),
-          cstPis: texto(i.imposto?.pis?.cst, ITEM_VAZIO.cstPis),
-          cstCofins: texto(i.imposto?.cofins?.cst, ITEM_VAZIO.cstCofins),
+          cfop: texto(i.cfop, '5102'),
+          unidade: texto(i.unidade, 'UN'),
+          quantidade: decimal(i.quantidade, 4, '1.0000'),
+          valorUnitario: decimal(i.valorUnitario, 2, '0.00'),
+          trib: lerTributos(i),
         }))
-      : [{ ...ITEM_VAZIO }],
+      : [novoItem()],
 
     modalidadeFrete: texto(d.transporte?.modalidadeFrete, '9'),
     formaPagamento: texto(d.pagamentos?.[0]?.forma, '01'),
@@ -130,13 +117,15 @@ function valoresIniciais(dados?: any) {
 
 export const NovaNFeView: React.FC<{
   meta: Meta | null;
+  /** Regime (CRT) e UF do emitente decidem os campos de tributo */
+  emitente: Emitente | null;
   /** Nota de origem quando a tela foi aberta pelo "Novo (copiar)" */
   copiaDe?: CopiaNFe | null;
   /** Nota sendo corrigida, quando a tela foi aberta pelo "Editar" */
   edicao?: EdicaoNFe | null;
   onCancelar: () => void;
   onEmitida: () => void;
-}> = ({ meta, copiaDe, edicao, onCancelar, onEmitida }) => {
+}> = ({ meta, emitente, copiaDe, edicao, onCancelar, onEmitida }) => {
   const { retorno, erro, errosSchema, carregando, executar, setErro, falhar } = useOperacao();
 
   // Calculado uma vez: a tela nasce preenchida e dali em diante o usuário edita
@@ -180,6 +169,8 @@ export const NovaNFeView: React.FC<{
   }, [serie]);
 
   const [chaveGerada, setChaveGerada] = useState('');
+  const [totalNota, setTotalNota] = useState<number | null>(null);
+  const [removendoItem, setRemovendoItem] = useState<number | null>(null);
   const [confirmandoEnvio, setConfirmandoEnvio] = useState(false);
 
   // Não contribuinte é sempre consumidor final (rejeição 696): o toggle trava em Sim.
@@ -187,13 +178,24 @@ export const NovaNFeView: React.FC<{
   const naoContribuinte = destIndIE === '9';
   const consumidorFinalEfetivo = naoContribuinte || consumidorFinal;
 
+  // CRT 1 e 4 usam CSOSN; o 2 (excesso de sublimite) usa CST
+  const simples = [1, 4].includes(Number(emitente?.crt));
+  // Mesma regra do servidor: outra UF + consumidor final + não contribuinte = DIFAL
+  const difal = !!destDocumento && !!destLogradouro && !!emitente?.uf &&
+    destUf !== emitente.uf && destUf !== 'EX' && consumidorFinalEfetivo && naoContribuinte;
+  const contextoTributos = (i: ItemForm) => ({ t: i.trib, simples, difal, cfop: i.cfop });
+
   const total = itens.reduce(
     (acc, i) => acc + Number(i.quantidade || 0) * Number(i.valorUnitario || 0),
     0,
   );
 
-  const alterarItem = (indice: number, campo: keyof ItemForm, valor: string) => {
+  const alterarItem = (indice: number, campo: Exclude<keyof ItemForm, 'trib'>, valor: string) => {
     setItens((atual) => atual.map((i, n) => (n === indice ? { ...i, [campo]: valor } : i)));
+  };
+
+  const alterarTributo = (indice: number, k: string, valor: string) => {
+    setItens((atual) => atual.map((i, n) => (n === indice ? { ...i, trib: { ...i.trib, [k]: valor } } : i)));
   };
 
   const montarDocumento = () => ({
@@ -206,7 +208,6 @@ export const NovaNFeView: React.FC<{
       finalidade: Number(finalidade),
       consumidorFinal: consumidorFinalEfetivo ? 1 : 0,
       presencial: Number(presencial),
-      idDestino: destUf ? 1 : 1,
     },
     destinatario: destDocumento
       ? {
@@ -228,36 +229,21 @@ export const NovaNFeView: React.FC<{
             : undefined,
         }
       : undefined,
-    itens: itens.map((i) => {
-      const quantidade = Number(i.quantidade || 0);
-      const valorUnitario = Number(i.valorUnitario || 0);
-      const valorTotal = Math.round(quantidade * valorUnitario * 100) / 100;
-      const aliquota = Number(i.aliquotaICMS || 0);
-
-      return {
-        codigo: i.codigo,
-        descricao: i.descricao,
-        ncm: i.ncm,
-        cfop: i.cfop,
-        unidade: i.unidade,
-        quantidade,
-        valorUnitario,
-        valorTotal,
-        imposto: {
-          origem: Number(i.origem),
-          cst: i.cst,
-          csosn: i.csosn,
-          modBC: 3,
-          baseCalculo: aliquota > 0 ? valorTotal : 0,
-          aliquota,
-          valor: Math.round(valorTotal * aliquota) / 100,
-          pis: { cst: i.cstPis },
-          cofins: { cst: i.cstCofins },
-        },
-      };
-    }),
+    // Bases e valores dos tributos são calculados no servidor
+    itens: itens.map((i) => ({
+      codigo: i.codigo,
+      descricao: i.descricao,
+      ncm: i.ncm,
+      cfop: i.cfop,
+      unidade: i.unidade,
+      quantidade: Number(i.quantidade || 0),
+      valorUnitario: Number(i.valorUnitario || 0),
+      // imposto, e também DI e combustível quando o item tiver
+      ...montarTributos(contextoTributos(i)),
+    })),
     transporte: { modalidadeFrete: Number(modalidadeFrete) },
-    pagamentos: [{ forma: formaPagamento, valor: Math.round(total * 100) / 100 }],
+    // Sem valor: o servidor usa o total da nota, que já inclui IPI, ST etc.
+    pagamentos: [{ forma: formaPagamento }],
     informacoesAdicionais: { contribuinte: observacoes },
   });
 
@@ -267,9 +253,11 @@ export const NovaNFeView: React.FC<{
       // Na edição o servidor regrava a mesma linha, em vez de criar uma segunda nota
       const resposta = await api.gerarNFe(montarDocumento(), edicao?.id);
       setChaveGerada(resposta.chave);
+      setTotalNota(resposta.totais?.vNF ?? null);
     } catch (err: any) {
       // Sem chave, o "Transmitir" volta a ficar bloqueado até gerar um XML válido
       setChaveGerada('');
+      setTotalNota(null);
       falhar(err);
     }
   };
@@ -508,7 +496,7 @@ export const NovaNFeView: React.FC<{
         titulo="Itens"
         descricao={`${itens.length} item(ns) • total ${formatarMoeda(total)}`}
         acoes={
-          <Botao icone={<Plus className="w-3.5 h-3.5" />} onClick={() => setItens((a) => [...a, { ...ITEM_VAZIO }])}>
+          <Botao icone={<Plus className="w-3.5 h-3.5" />} onClick={() => setItens((a) => [...a, novoItem()])}>
             Adicionar item
           </Botao>
         }
@@ -561,7 +549,8 @@ export const NovaNFeView: React.FC<{
                   <Botao
                     variante="perigo"
                     icone={<Trash2 className="w-3.5 h-3.5" />}
-                    onClick={() => setItens((a) => a.filter((_, n) => n !== indice))}
+                    title="Remover item"
+                    onClick={() => setRemovendoItem(indice)}
                   />
                 </div>
 
@@ -584,44 +573,7 @@ export const NovaNFeView: React.FC<{
                     {formatarMoeda(Number(item.quantidade || 0) * Number(item.valorUnitario || 0))}
                   </div>
                 </Campo>
-                <Selecao
-                  rotulo="Origem"
-                  value={item.origem}
-                  onChange={(e) => alterarItem(indice, 'origem', e.target.value)}
-                  opcoes={[0, 1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ valor: String(n), rotulo: String(n) }))}
-                  className="lg:col-span-1"
-                />
-                <Texto
-                  rotulo="CST ICMS"
-                  value={item.cst}
-                  onChange={(e) => alterarItem(indice, 'cst', e.target.value.replace(/\D/g, '').slice(0, 2))}
-                  className="lg:col-span-1"
-                />
-                <Texto
-                  rotulo="CSOSN"
-                  value={item.csosn}
-                  onChange={(e) => alterarItem(indice, 'csosn', e.target.value.replace(/\D/g, '').slice(0, 3))}
-                  className="lg:col-span-1"
-                />
-                <Campo rotulo="Alíq. ICMS %" className="lg:col-span-1">
-                  <NumberField
-                    value={item.aliquotaICMS}
-                    scale={4}
-                    onChange={(v) => alterarItem(indice, 'aliquotaICMS', v)}
-                  />
-                </Campo>
-                <Texto
-                  rotulo="CST PIS"
-                  value={item.cstPis}
-                  onChange={(e) => alterarItem(indice, 'cstPis', e.target.value.replace(/\D/g, '').slice(0, 2))}
-                  className="lg:col-span-1"
-                />
-                <Texto
-                  rotulo="CST COFINS"
-                  value={item.cstCofins}
-                  onChange={(e) => alterarItem(indice, 'cstCofins', e.target.value.replace(/\D/g, '').slice(0, 2))}
-                  className="lg:col-span-1"
-                />
+                <TributosItem contexto={contextoTributos(item)} onAlterar={(k, v) => alterarTributo(indice, k, v)} />
               </div>
             ))}
           </div>
@@ -660,7 +612,10 @@ export const NovaNFeView: React.FC<{
         <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-stone-200 dark:border-stone-800 mt-4">
           <div className="text-xs text-stone-500 dark:text-stone-400">
             {chaveGerada ? (
-              <>Chave gerada: <span className="font-mono text-stone-800 dark:text-stone-100">{formatarChave(chaveGerada)}</span></>
+              <>
+                Chave gerada: <span className="font-mono text-stone-800 dark:text-stone-100">{formatarChave(chaveGerada)}</span>
+                {totalNota !== null && <> • total da nota {formatarMoeda(totalNota)}</>}
+              </>
             ) : (
               'Gere o XML antes de transmitir.'
             )}
@@ -692,6 +647,18 @@ export const NovaNFeView: React.FC<{
           ['Protocolo', retorno?.dados?.protocolo],
           ['Situação da nota', retorno?.dados?.cStatNota && `${retorno.dados.cStatNota} — ${retorno.dados.motivoNota}`],
         ]}
+      />
+
+      <Confirmacao
+        aberto={removendoItem !== null}
+        titulo="Remover este item?"
+        mensagem={`O item ${removendoItem !== null ? removendoItem + 1 : ''} sai da nota.`}
+        rotuloConfirmar="Remover"
+        onConfirmar={() => {
+          setItens((a) => a.filter((_, n) => n !== removendoItem));
+          setRemovendoItem(null);
+        }}
+        onCancelar={() => setRemovendoItem(null)}
       />
 
       <Confirmacao

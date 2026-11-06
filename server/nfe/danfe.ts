@@ -215,15 +215,26 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
   y += 5 * MM;
 
   const tot = inf.total?.ICMSTot || {};
+  // Três linhas de seis, como no quadro "Cálculo do Imposto" do MOC
   const colunas: [string, string][][] = [
     [
       ['Base de Cálculo do ICMS', moeda(tot.vBC)],
       ['Valor do ICMS', moeda(tot.vICMS)],
       ['Base de Cálculo do ICMS ST', moeda(tot.vBCST)],
       ['Valor do ICMS ST', moeda(tot.vST)],
-      ['Valor Total dos Produtos', moeda(tot.vProd)],
+      ['Valor do FCP', moeda(tot.vFCP)],
+      ['Valor do FCP ST', moeda(tot.vFCPST)],
     ],
     [
+      ['Valor do Imp. Importação', moeda(tot.vII)],
+      ['Valor Total do IPI', moeda(tot.vIPI)],
+      ['V. ICMS UF Destino', moeda(tot.vICMSUFDest)],
+      ['V. FCP UF Destino', moeda(tot.vFCPUFDest)],
+      ['Valor do ICMS Desonerado', moeda(tot.vICMSDeson)],
+      ['V. Aprox. dos Tributos', moeda(tot.vTotTrib)],
+    ],
+    [
+      ['Valor Total dos Produtos', moeda(tot.vProd)],
       ['Valor do Frete', moeda(tot.vFrete)],
       ['Valor do Seguro', moeda(tot.vSeg)],
       ['Desconto', moeda(tot.vDesc)],
@@ -232,30 +243,70 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
     ],
   ];
 
-  for (const linha of colunas) {
+  const linhaDeCampos = (linha: [string, string][]) => {
     const largCampo = larg / linha.length;
     linha.forEach(([rotulo, valor], i) => {
       campo(esq + i * largCampo, y, largCampo, 7 * MM, rotulo, valor, { direita: true });
     });
     y += 7 * MM;
-  }
+  };
+
+  colunas.forEach(linhaDeCampos);
   y += 2 * MM;
+
+  // ---- ICMS monofásico (combustíveis) ----
+  // As tags só existem no XML quando algum item é monofásico
+  if (tot.qBCMono !== undefined) {
+    pdf.fontSize(6).font('Helvetica-Bold').fillColor('#000').text('ICMS MONOFÁSICO — COMBUSTÍVEIS', esq, y + 1);
+    y += 5 * MM;
+    linhaDeCampos([
+      ['Quantidade Tributada', moeda(tot.qBCMono)],
+      ['Valor do ICMS Monofásico', moeda(tot.vICMSMono)],
+      ['Qtd. Tributada c/ Retenção', moeda(tot.qBCMonoReten)],
+      ['ICMS Monofásico Retido', moeda(tot.vICMSMonoReten)],
+      ['Qtd. Retida Anteriormente', moeda(tot.qBCMonoRet)],
+      ['ICMS Retido Anteriormente', moeda(tot.vICMSMonoRet)],
+    ]);
+    y += 2 * MM;
+  }
+
+  // ---- IBS / CBS (reforma tributária) ----
+  const ibscbs = inf.total?.IBSCBSTot;
+  if (ibscbs) {
+    pdf.fontSize(6).font('Helvetica-Bold').fillColor('#000').text('IBS / CBS — REFORMA TRIBUTÁRIA', esq, y + 1);
+    y += 5 * MM;
+    const ibs = ibscbs.gIBS || {};
+    linhaDeCampos([
+      ['Base de Cálculo IBS/CBS', moeda(ibscbs.vBCIBSCBS)],
+      ['Valor do IBS UF', moeda(ibs.gIBSUF?.vIBSUF)],
+      ['Valor do IBS Município', moeda(ibs.gIBSMun?.vIBSMun)],
+      ['Valor Total do IBS', moeda(ibs.vIBS)],
+      ['Valor da CBS', moeda(ibscbs.gCBS?.vCBS)],
+    ]);
+    y += 2 * MM;
+  }
 
   // ---- Itens ----
   pdf.fontSize(6).font('Helvetica-Bold').fillColor('#000').text('DADOS DOS PRODUTOS / SERVIÇOS', esq, y + 1);
   y += 5 * MM;
 
+  // Colunas do quadro de produtos do MOC; `icms` é o grupo variável (ICMS00, ICMSSN102...)
+  const ipiDe = (imp: any) => imp?.IPI?.IPITrib;
   const cols = [
-    { titulo: 'CÓDIGO', largura: 0.09, campo: (p: any) => p.cProd },
-    { titulo: 'DESCRIÇÃO', largura: 0.3, campo: (p: any) => p.xProd },
-    { titulo: 'NCM', largura: 0.07, campo: (p: any) => p.NCM },
-    { titulo: 'CFOP', largura: 0.05, campo: (p: any) => p.CFOP },
-    { titulo: 'UN', largura: 0.04, campo: (p: any) => p.uCom },
-    { titulo: 'QTD', largura: 0.08, campo: (p: any) => moeda(p.qCom, 4), direita: true },
-    { titulo: 'VL. UNIT.', largura: 0.1, campo: (p: any) => moeda(p.vUnCom), direita: true },
-    { titulo: 'VL. TOTAL', largura: 0.1, campo: (p: any) => moeda(p.vProd), direita: true },
-    { titulo: 'BC ICMS', largura: 0.09, campo: (_p: any, imp: any) => moeda(imp?.vBC), direita: true },
-    { titulo: 'VL. ICMS', largura: 0.08, campo: (_p: any, imp: any) => moeda(imp?.vICMS), direita: true },
+    { titulo: 'CÓDIGO', largura: 0.07, campo: (p: any) => p.cProd },
+    { titulo: 'DESCRIÇÃO', largura: 0.255, campo: (p: any) => p.xProd },
+    { titulo: 'NCM/SH', largura: 0.06, campo: (p: any) => p.NCM },
+    { titulo: 'O/CST', largura: 0.045, campo: (_p: any, icms: any) => (icms ? `${icms.orig ?? ''}${icms.CST ?? icms.CSOSN ?? ''}` : '') },
+    { titulo: 'CFOP', largura: 0.04, campo: (p: any) => p.CFOP },
+    { titulo: 'UN', largura: 0.035, campo: (p: any) => p.uCom },
+    { titulo: 'QTD', largura: 0.065, campo: (p: any) => moeda(p.qCom, 4), direita: true },
+    { titulo: 'VL. UNIT.', largura: 0.075, campo: (p: any) => moeda(p.vUnCom), direita: true },
+    { titulo: 'VL. TOTAL', largura: 0.075, campo: (p: any) => moeda(p.vProd), direita: true },
+    { titulo: 'BC ICMS', largura: 0.07, campo: (_p: any, icms: any) => moeda(icms?.vBC), direita: true },
+    { titulo: 'VL. ICMS', largura: 0.065, campo: (_p: any, icms: any) => moeda(icms?.vICMS), direita: true },
+    { titulo: 'VL. IPI', largura: 0.06, campo: (_p: any, _i: any, imp: any) => moeda(ipiDe(imp)?.vIPI), direita: true },
+    { titulo: '% ICMS', largura: 0.045, campo: (_p: any, icms: any) => moeda(icms?.pICMS), direita: true },
+    { titulo: '% IPI', largura: 0.04, campo: (_p: any, _i: any, imp: any) => moeda(ipiDe(imp)?.pIPI), direita: true },
   ];
 
   const alturaLinha = 4.5 * MM;
@@ -289,7 +340,7 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
     for (const c of cols) {
       const w = larg * c.largura;
       pdf.fontSize(5.2).font('Helvetica').fillColor('#000')
-        .text(String(c.campo(prod, icms) ?? ''), x + 1, y + 1.5, {
+        .text(String(c.campo(prod, icms, det.imposto) ?? ''), x + 1, y + 1.5, {
           width: w - 2,
           align: (c as any).direita ? 'right' : 'left',
           lineBreak: false,
@@ -301,6 +352,18 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
   }
 
   y += 2 * MM;
+
+  // ---- ISSQN (NF-e conjugada) ----
+  const issqn = inf.total?.ISSQNtot;
+  if (issqn) {
+    pdf.fontSize(6).font('Helvetica-Bold').fillColor('#000').text('CÁLCULO DO ISSQN', esq, y + 1);
+    y += 5 * MM;
+    campo(esq, y, larg / 4, 7 * MM, 'Inscrição Municipal', inf.emit?.IM || '');
+    campo(esq + larg / 4, y, larg / 4, 7 * MM, 'Valor Total dos Serviços', moeda(issqn.vServ), { direita: true });
+    campo(esq + larg / 2, y, larg / 4, 7 * MM, 'Base de Cálculo do ISSQN', moeda(issqn.vBC), { direita: true });
+    campo(esq + (3 * larg) / 4, y, larg / 4, 7 * MM, 'Valor do ISSQN', moeda(issqn.vISS), { direita: true });
+    y += 9 * MM;
+  }
 
   // ---- Informações complementares ----
   const complemento = [inf.infAdic?.infCpl, inf.infAdic?.infAdFisco].filter(Boolean).join(' | ');
@@ -368,6 +431,26 @@ async function danfceBobina(inf: any, chave: string, xml: string, opcoes: Opcoes
     pdf.fontSize(6).font('Helvetica').text(`Pagamento ${pagamento.tPag}: ${moeda(pagamento.vPag)}`, { width: w, align: 'right' });
   }
 
+  // Lei 12.741/2012 e reforma tributária
+  if (moeda(tot.vTotTrib)) {
+    pdf.fontSize(5.5).text(`Tributos totais incidentes (Lei 12.741/2012): R$ ${moeda(tot.vTotTrib)}`, { width: w, align: 'right' });
+  }
+  const monofasico = Number(tot.vICMSMono || 0) + Number(tot.vICMSMonoReten || 0);
+  if (monofasico || moeda(tot.vICMSMonoRet)) {
+    pdf.fontSize(5.5).text(
+      `ICMS monofásico R$ ${moeda(monofasico) || '0,00'}` +
+        (moeda(tot.vICMSMonoRet) ? `   retido anteriormente R$ ${moeda(tot.vICMSMonoRet)}` : ''),
+      { width: w, align: 'right' },
+    );
+  }
+  const ibscbs = inf.total?.IBSCBSTot;
+  if (ibscbs) {
+    pdf.fontSize(5.5).text(
+      `IBS R$ ${moeda(ibscbs.gIBS?.vIBS) || '0,00'}   CBS R$ ${moeda(ibscbs.gCBS?.vCBS) || '0,00'}`,
+      { width: w, align: 'right' },
+    );
+  }
+
   pdf.moveDown(0.4);
   pdf.fontSize(5.5).font('Helvetica').text(`Consulte pela chave de acesso em ${valorTag(xml, 'urlChave')}`, centro);
   pdf.fontSize(6).text(chaveFormatada(chave), centro);
@@ -376,8 +459,11 @@ async function danfceBobina(inf: any, chave: string, xml: string, opcoes: Opcoes
   if (qr) {
     try {
       const imagem = await qrcode(qr);
-      pdf.image(imagem, (largura - 30 * MM) / 2, pdf.y + 4, { width: 30 * MM });
-      pdf.moveDown(9);
+      // O texto seguinte começa abaixo da imagem (moveDown dependia do tamanho da fonte e ficava curto)
+      const topo = pdf.y + 4;
+      pdf.image(imagem, (largura - 30 * MM) / 2, topo, { width: 30 * MM });
+      pdf.x = pdf.page.margins.left;
+      pdf.y = topo + 30 * MM + 4;
     } catch {
       /* sem QR-Code o cupom ainda sai, só perde a consulta pelo celular */
     }

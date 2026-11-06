@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { CopyPlus, FileCheck2, FileInput, Mail, Pencil, Plus, Printer, Send, ShieldCheck, X } from 'lucide-react';
 import * as api from '../services/api';
-import { DocumentoLista, Meta, ResultadoValidacao } from '../types';
+import { DocumentoLista, Emitente, Meta, ResultadoValidacao } from '../types';
 import { Botao, Confirmacao, Etiqueta, Faixa, Texto } from './ui';
 import { AcaoGrade, ColunaGrade, Grade } from './Grade';
 import { ListaErrosSchema, PainelRespostas, useOperacao } from './PainelRespostas';
@@ -12,8 +12,13 @@ import { AMBIENTES, SITUACOES, formatarChave, formatarDataHora, formatarMoeda } 
  * Aba "Envios": a lista dos documentos e as ações sobre eles — transmitir,
  * imprimir o DANFE, enviar por e-mail, validar a assinatura e importar XML.
  */
-export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: () => void }> = ({
+export const DocumentosView: React.FC<{
+  meta: Meta | null;
+  emitente: Emitente | null;
+  onRecarregarPainel: () => void;
+}> = ({
   meta,
+  emitente,
   onRecarregarPainel,
 }) => {
   const { retorno, erro, errosSchema, carregando, executar, setErro, falhar } = useOperacao();
@@ -187,6 +192,7 @@ export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: (
     return (
       <NovaNFeView
         meta={meta}
+        emitente={emitente}
         copiaDe={copiaDe}
         edicao={edicao}
         onCancelar={fecharEmissao}

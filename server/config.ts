@@ -22,6 +22,9 @@ export interface ConfigGeral {
   respTecContato: string;
   respTecEmail: string;
   respTecFone: string;
+  /** Emitente de NF-e conjugada (itens com ISSQN) */
+  inscricaoMunicipal: string;
+  cnae: string;
   versaoQRCode: number;
   atualizarXML: boolean;
   exibirErroSchema: boolean;
@@ -104,6 +107,8 @@ export const CONFIG_PADRAO: ConfigNFe = {
     respTecContato: '',
     respTecEmail: '',
     respTecFone: '',
+    inscricaoMunicipal: '',
+    cnae: '',
     versaoQRCode: 2,
     atualizarXML: true,
     exibirErroSchema: true,

@@ -7,7 +7,7 @@
  */
 import assert from 'assert';
 import { chaveValida, cnpjValido, cpfValido, digitoChave, lerChave, montarChave } from './chave.js';
-import { resolverDistribuicaoDFe, resolverServico, ufPorCodigo } from './servicos.js';
+import { UFS, resolverDistribuicaoDFe, resolverServico, ufPorCodigo, urlsConsulta } from './servicos.js';
 import { grupo, limparTexto, num, tag } from './xml.js';
 import { somarTotais } from './gerarNFe.js';
 import { anoMesChave, dataDoDocumento, dataHoraDFe } from './datas.js';
@@ -103,6 +103,27 @@ conferir('resolução das URLs no ACBrNFeServicos.ini', () => {
   assert.ok(dist.soapAction.endsWith('/nfeDistDFeInteresse'));
 
   assert.strictEqual(ufPorCodigo(35), 'SP');
+});
+
+conferir('URL de consulta sai na versão do QR-Code e cabe no urlChave', () => {
+  // Em SP a chave sem sufixo ainda é a página .aspx antiga, com 95 caracteres:
+  // só a _1.00 cabe no limite de 85 do urlChave (leiauteNFe_v4.00.xsd).
+  const sp = urlsConsulta('NFCe', 'SP', 2);
+  assert.ok(sp.consulta.endsWith('/consulta'), `esperava a URL curta de SP, veio ${sp.consulta}`);
+  assert.ok(sp.qrCode.endsWith('/qrcode'), `esperava o QR-Code curto de SP, veio ${sp.qrCode}`);
+  for (const uf of UFS) {
+    for (const amb of [1, 2] as const) {
+      const { consulta } = urlsConsulta('NFCe', uf, amb);
+      assert.ok(consulta.length <= 85, `urlChave de ${uf}/${amb} tem ${consulta.length} caracteres: ${consulta}`);
+    }
+  }
+
+  // SC publica a _2.00 e é ela que vale para o QR-Code versão 2
+  const sc = urlsConsulta('NFCe', 'SC', 2);
+  assert.ok(sc.consulta.includes('sat.sef.sc.gov.br'), sc.consulta);
+
+  // Versão 1 não pode enxergar uma chave _2.00
+  assert.ok(urlsConsulta('NFCe', 'SP', 2, 1).consulta.endsWith('/consulta'));
 });
 
 conferir('serviço inexistente falha com mensagem clara', () => {

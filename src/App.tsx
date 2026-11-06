@@ -165,7 +165,7 @@ export default function App() {
           // As demais telas seguem o b2b admin: ocupam toda a área útil, chapadas, sem margem
           <main className="flex-1 flex flex-col overflow-y-auto min-h-0 bg-white dark:bg-stone-900">
             {abaAtiva === 'documentos' && (
-              <DocumentosView meta={meta} onRecarregarPainel={recarregar} />
+              <DocumentosView meta={meta} emitente={emitente} onRecarregarPainel={recarregar} />
             )}
             {abaAtiva === 'consultas' && (
               <ConsultasView meta={meta} ufPadrao={emitente.uf || 'SP'} />

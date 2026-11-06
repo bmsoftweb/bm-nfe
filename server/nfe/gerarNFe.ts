@@ -10,8 +10,8 @@
 import crypto from 'crypto';
 import { Contexto } from './contexto.js';
 import { montarChave } from './chave.js';
-import { CODIGO_UF, urlsConsulta } from './servicos.js';
-import { dataDoDocumento, dataHoraDFe } from './datas.js';
+import { CODIGO_UF, VERSAO_QRCODE, urlsConsulta } from './servicos.js';
+import { dataDoDocumento, dataHoraDFe, dataISO } from './datas.js';
 import { DECLARACAO, NS_NFE, grupo, grupoObrigatorio, limparTexto, num, tag } from './xml.js';
 
 // ---------------------------------------------------------------------------
@@ -45,31 +45,113 @@ export interface Destinatario {
   endereco?: Endereco;
 }
 
+type TributoPisCofins = { cst: string; base?: number; aliquota?: number; valor?: number };
+
+/**
+ * Tributos do item. Bases e valores que não vierem informados são calculados a
+ * partir do valor da operação e das alíquotas — o chamador só manda valores
+ * quando quiser impor um número diferente do cálculo.
+ */
 export interface ImpostoItem {
   /** Origem da mercadoria, 0 a 8 */
   origem: number;
-  /** CST do ICMS (regime normal) — 00, 10, 20, 40, 41, 50, 51, 60, 70, 90 */
+  /** CST do ICMS (regime normal) — 00, 10, 20, 30, 40, 41, 50, 51, 60, 70, 90 */
   cst?: string;
   /** CSOSN (Simples Nacional) — 101, 102, 103, 201, 202, 203, 300, 400, 500, 900 */
   csosn?: string;
   modBC?: number;
   baseCalculo?: number;
+  /**
+   * Alíquota do ICMS próprio. Nos CST/CSOSN só de ST (30, 201, 202, 203) é a
+   * alíquota interna do remetente, usada para deduzir o ICMS próprio da ST.
+   */
   aliquota?: number;
   valor?: number;
   reducaoBC?: number;
-  /** Substituição tributária */
+  /** Fundo de Combate à Pobreza, sobre a base do ICMS */
+  aliquotaFCP?: number;
+  /** Diferimento (CST 51 e 90), em % do ICMS da operação */
+  percentualDiferimento?: number;
+  /** Substituição tributária (CST 10, 30, 70, 90; CSOSN 201, 202, 203, 900) */
   modBCST?: number;
   mvaST?: number;
   reducaoBCST?: number;
   baseCalculoST?: number;
   aliquotaST?: number;
   valorST?: number;
-  /** Crédito do Simples Nacional */
+  aliquotaFCPST?: number;
+  /** ST cobrada anteriormente (CST 60 e CSOSN 500) */
+  baseSTRetido?: number;
+  aliquotaSTRetido?: number;
+  valorSubstituto?: number;
+  valorSTRetido?: number;
+  /** ICMS desonerado (CST 20, 30, 40, 41, 50, 70, 90) */
+  valorDesonerado?: number;
+  motivoDesoneracao?: number;
+  /** O desonerado é abatido do total da nota (indDeduzDeson) */
+  deduzDesoneracao?: boolean;
+  /**
+   * Monofasia de combustíveis (CST 02, 15, 53, 61), em R$ por unidade tributável.
+   * A quantidade da base é a do item.
+   */
+  adRemICMS?: number;
+  /** CST 15: ad rem do ICMS com retenção */
+  adRemICMSReten?: number;
+  /** CST 15: % de redução da ad rem e motivo (1=Transporte coletivo, 9=Outros) */
+  reducaoAdRem?: number;
+  motivoReducaoAdRem?: number;
+  /** CST 61: ad rem do ICMS retido anteriormente */
+  adRemICMSRet?: number;
+  /** Crédito do Simples Nacional (CSOSN 101, 201, 900) */
   aliquotaCredito?: number;
   valorCredito?: number;
-  pis: { cst: string; base?: number; aliquota?: number; valor?: number };
-  cofins: { cst: string; base?: number; aliquota?: number; valor?: number };
+  pis: TributoPisCofins;
+  cofins: TributoPisCofins;
   ipi?: { cst: string; codigoEnquadramento?: string; base?: number; aliquota?: number; valor?: number };
+  /** Imposto de importação (CFOP 3xxx) */
+  ii?: { base: number; despesasAduaneiras?: number; valor: number; iof?: number };
+  /** Item de serviço (NF-e conjugada): o ISSQN entra no lugar do ICMS */
+  issqn?: {
+    aliquota: number;
+    base?: number;
+    valor?: number;
+    /** Item da lista da LC 116, no formato "01.01" */
+    codigoServico: string;
+    /** Município de ocorrência; sem ele, o do emitente */
+    municipio?: string;
+    /** indISS: 1=Exigível, 2=Não incidência, 3=Isenção, 4=Exportação, 5=Imunidade, 6/7=Exigibilidade suspensa */
+    exigibilidade?: number;
+    incentivo?: boolean;
+    valorRetido?: number;
+  };
+  /** Partilha do ICMS (DIFAL): venda interestadual a consumidor final não contribuinte */
+  difal?: { aliquotaInterna: number; aliquotaFCP?: number; aliquotaInterestadual?: number; base?: number };
+  /** Reforma tributária (LC 214/2025, NT 2025.002) */
+  ibscbs?: {
+    cst: string;
+    /** cClassTrib, 6 dígitos */
+    classificacao: string;
+    base?: number;
+    aliquotaIBSUF?: number;
+    aliquotaIBSMun?: number;
+    aliquotaCBS?: number;
+    /** % de redução das alíquotas (gRed) */
+    reducao?: number;
+    /** % diferido (gDif) */
+    diferimento?: number;
+    /** CST 620 — monofasia ad rem, em R$ por unidade tributável */
+    monofasia?: {
+      adRemIBS?: number;
+      adRemCBS?: number;
+      adRemIBSReten?: number;
+      adRemCBSReten?: number;
+      /** Valores já retidos anteriormente (gMonoRet) */
+      valorIBSRetido?: number;
+      valorCBSRetido?: number;
+    };
+  };
+  /** Valor aproximado dos tributos (Lei 12.741/2012) */
+  valorAproximadoTributos?: number;
 }
 
 export interface ItemNFe {
@@ -91,7 +173,38 @@ export interface ItemNFe {
   /** 1 = o valor do item entra no total da nota (padrão) */
   compoeTotal?: boolean;
   informacoesAdicionais?: string;
+  /** Declaração de Importação (CFOP 3xxx) */
+  di?: DeclaracaoImportacao;
+  /** Grupo de combustível: obrigatório na monofasia do ICMS */
+  combustivel?: {
+    codigoANP: string;
+    descricaoANP: string;
+    /** UF de consumo; sem ela, a do destinatário (ou a do emitente) */
+    ufConsumo?: string;
+    percentualBio?: number;
+  };
   imposto: ImpostoItem;
+}
+
+// ponytail: um DI por item; o schema aceita até 100, entra quando alguém precisar
+export interface DeclaracaoImportacao {
+  numero: string;
+  /** Datas no formato aaaa-mm-dd */
+  data: string;
+  localDesembaraco: string;
+  ufDesembaraco: string;
+  dataDesembaraco: string;
+  /** tpViaTransp: 1=Marítima, 2=Fluvial, 3=Lacustre, 4=Aérea, 5=Postal, 6=Ferroviária, 7=Rodoviária, 8=Conduto, 9=Meios próprios, 10=Entrada/saída ficta, 11=Courier, 12=Em mãos, 13=Por reboque */
+  viaTransporte: number;
+  /** AFRMM, obrigatório na via marítima */
+  afrmm?: number;
+  /** tpIntermedio: 1=Por conta própria, 2=Por conta e ordem, 3=Por encomenda */
+  intermedio: number;
+  /** Adquirente ou encomendante, nos tipos 2 e 3 */
+  cnpjAdquirente?: string;
+  ufTerceiro?: string;
+  codigoExportador: string;
+  adicoes: { numero?: number; sequencia: number; fabricante: string; desconto?: number; drawback?: string }[];
 }
 
 export interface Volume {
@@ -106,7 +219,8 @@ export interface Volume {
 export interface Pagamento {
   /** 01=Dinheiro, 02=Cheque, 03=Crédito, 04=Débito, 15=Boleto, 90=Sem pagamento, 99=Outros */
   forma: string;
-  valor: number;
+  /** Sem valor, o pagamento é o total da nota */
+  valor?: number;
   /** 0=À vista, 1=A prazo */
   indPag?: number;
   descricao?: string;
@@ -156,12 +270,46 @@ export interface NFeGerada {
   totais: Totais;
 }
 
-export interface Totais {
-  vBC: number; vICMS: number; vICMSDeson: number; vFCP: number;
-  vBCST: number; vST: number; vFCPST: number; vFCPSTRet: number;
-  vProd: number; vFrete: number; vSeg: number; vDesc: number;
-  vII: number; vIPI: number; vIPIDevol: number; vPIS: number; vCOFINS: number;
-  vOutro: number; vNF: number;
+/** O que cada item contribui para os totais — exatamente o que foi para o XML */
+const CAMPOS_TOTAL = [
+  'vProd', 'vServ', 'vDesc', 'vFrete', 'vSeg', 'vOutro',
+  'vBC', 'vICMS', 'vICMSDeson', 'vICMSDesonDeduzido', 'vFCP', 'vBCST', 'vST', 'vFCPST',
+  'vII', 'vIPI', 'vPIS', 'vCOFINS', 'vPISServ', 'vCOFINSServ',
+  'vBCISS', 'vISS', 'vISSRet', 'vFCPUFDest', 'vICMSUFDest',
+  'vBCIBSCBS', 'vIBSUF', 'vDifIBSUF', 'vIBSMun', 'vDifIBSMun', 'vCBS', 'vDifCBS', 'vTotTrib',
+  'qBCMono', 'vICMSMono', 'qBCMonoReten', 'vICMSMonoReten', 'qBCMonoRet', 'vICMSMonoRet',
+  'vIBSMono', 'vCBSMono', 'vIBSMonoReten', 'vCBSMonoReten', 'vIBSMonoRet', 'vCBSMonoRet',
+] as const;
+
+type Valores = Record<(typeof CAMPOS_TOTAL)[number], number>;
+
+export interface Totais extends Valores {
+  vNF: number;
+  temServico: boolean;
+  temDifal: boolean;
+  temIBSCBS: boolean;
+  temMonoICMS: boolean;
+  temMonoIBSCBS: boolean;
+}
+
+/** Condições da nota que mudam o cálculo do item */
+interface Operacao {
+  simples: boolean;
+  /** Consumidor final: o IPI entra na base do ICMS */
+  consumidorFinal: boolean;
+  /** Interestadual para não contribuinte: o item leva o DIFAL */
+  difal: boolean;
+  municipioEmitente: string;
+}
+
+interface ItemCalculado {
+  imposto: string;
+  valores: Valores;
+  servico: boolean;
+  difal: boolean;
+  ibscbs: boolean;
+  monoICMS: boolean;
+  monoIBSCBS: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,138 +321,458 @@ function arred(v: number, casas = 2): number {
   return Number(num(v, casas));
 }
 
-function somarTotais(itens: ItemNFe[]): Totais {
-  const t: Totais = {
-    vBC: 0, vICMS: 0, vICMSDeson: 0, vFCP: 0, vBCST: 0, vST: 0, vFCPST: 0, vFCPSTRet: 0,
-    vProd: 0, vFrete: 0, vSeg: 0, vDesc: 0, vII: 0, vIPI: 0, vIPIDevol: 0,
-    vPIS: 0, vCOFINS: 0, vOutro: 0, vNF: 0,
-  };
+/** `p`% de `base`, arredondado como no XML */
+const pct = (base: number, p?: number) => arred((base * (p || 0)) / 100);
 
-  for (const item of itens) {
-    const bruto = item.valorTotal ?? item.quantidade * item.valorUnitario;
-    const i = item.imposto;
+/** Campos "Opc" do schema não aceitam zero: sem valor, a tag some */
+const opcional = (v: number) => (v > 0 ? num(v) : undefined);
 
-    if (item.compoeTotal !== false) t.vProd += bruto;
-    t.vDesc += item.valorDesconto || 0;
-    t.vFrete += item.valorFrete || 0;
-    t.vSeg += item.valorSeguro || 0;
-    t.vOutro += item.valorOutros || 0;
+const zerados = () => Object.fromEntries(CAMPOS_TOTAL.map((k) => [k, 0])) as Valores;
 
-    t.vBC += i.baseCalculo || 0;
-    t.vICMS += i.valor || 0;
-    t.vBCST += i.baseCalculoST || 0;
-    t.vST += i.valorST || 0;
-    t.vIPI += i.ipi?.valor || 0;
-    t.vPIS += i.pis?.valor || 0;
-    t.vCOFINS += i.cofins?.valor || 0;
+function totalizar(itens: ItemCalculado[]): Totais {
+  const t = zerados();
+  for (const { valores } of itens) {
+    for (const k of CAMPOS_TOTAL) t[k] += valores[k];
   }
+  for (const k of CAMPOS_TOTAL) t[k] = arred(t[k]);
 
-  for (const k of Object.keys(t) as (keyof Totais)[]) t[k] = arred(t[k]);
+  const vNF = arred(
+    t.vProd + t.vServ - t.vDesc - t.vICMSDesonDeduzido + t.vST + t.vFCPST +
+      t.vFrete + t.vSeg + t.vOutro + t.vII + t.vIPI,
+  );
 
-  t.vNF = arred(t.vProd - t.vDesc + t.vST + t.vFrete + t.vSeg + t.vOutro + t.vIPI + t.vII);
-  return t;
+  return {
+    ...t,
+    vNF,
+    temServico: itens.some((i) => i.servico),
+    temDifal: itens.some((i) => i.difal),
+    temIBSCBS: itens.some((i) => i.ibscbs),
+    temMonoICMS: itens.some((i) => i.monoICMS),
+    temMonoIBSCBS: itens.some((i) => i.monoIBSCBS),
+  };
+}
+
+/** Totais de uma lista de itens, sem gerar a nota */
+function somarTotais(itens: ItemNFe[], operacao: Partial<Operacao> = {}): Totais {
+  const op: Operacao = { simples: false, consumidorFinal: false, difal: false, municipioEmitente: '', ...operacao };
+  return totalizar(itens.map((item, n) => calcularItem(item, n, op)));
 }
 
 // ---------------------------------------------------------------------------
 // Impostos do item
 // ---------------------------------------------------------------------------
 
-function gerarICMS(i: ImpostoItem, simples: boolean): string {
+/** CST do IBS/CBS sem o grupo de valores: isenção (400) e imunidade/não incidência (410) */
+const CST_IBSCBS_SEM_VALORES = ['400', '410'];
+// ponytail: transferência de crédito (800) e ajuste de competência (810) têm grupos
+// próprios (gTransfCred, gAjusteCompet); entram quando alguém emitir
+const CST_IBSCBS_NAO_TRATADOS = ['800', '810'];
+
+/** CST do ICMS da monofasia de combustíveis (LC 192/2022) */
+const CST_MONOFASIA = ['02', '15', '53', '61'];
+
+function calcularItem(item: ItemNFe, indice: number, op: Operacao): ItemCalculado {
+  const v = zerados();
+  const i = item.imposto;
+  const servico = !!i.issqn;
+
+  const bruto = item.valorTotal ?? item.quantidade * item.valorUnitario;
+  if (item.compoeTotal !== false) v[servico ? 'vServ' : 'vProd'] = bruto;
+  v.vDesc = item.valorDesconto || 0;
+  v.vFrete = item.valorFrete || 0;
+  v.vSeg = item.valorSeguro || 0;
+  v.vOutro = item.valorOutros || 0;
+
+  // Valor da operação: base padrão de ICMS, IPI, ISSQN e PIS/COFINS
+  const operacao = arred(bruto + v.vFrete + v.vSeg + v.vOutro - v.vDesc);
+
+  const ipi = gerarIPI(i.ipi, operacao, v);
+  const ii = gerarII(i.ii, v);
+
+  let principal: string;
+  let difal = '';
+  if (servico) {
+    principal = ipi + gerarISSQN(i.issqn!, operacao, op.municipioEmitente, v);
+  } else {
+    const baseICMS = arred(operacao + (op.consumidorFinal ? v.vIPI : 0));
+    if (CST_MONOFASIA.includes(i.cst || '') && !item.combustivel?.codigoANP) {
+      throw new Error(`Item ${indice + 1}: o CST ${i.cst} do ICMS é de combustível e exige o código ANP do produto.`);
+    }
+    principal = grupoObrigatorio('ICMS', gerarICMS(i, op.simples, baseICMS, item.quantidade, v)) + ipi + ii;
+
+    if (op.difal) {
+      if (!i.difal?.aliquotaInterna) {
+        throw new Error(
+          `Item ${indice + 1}: venda interestadual a consumidor final não contribuinte exige o DIFAL ` +
+            '(rejeição 694). Informe a alíquota interna da UF de destino.',
+        );
+      }
+      difal = gerarDIFAL(i.difal, baseICMS, i.aliquota, v);
+    }
+  }
+
+  // PIS/COFINS com o ICMS fora da base (Tema 69 do STF)
+  const basePisCofins = arred(operacao - v.vICMS);
+  const pis = gerarPisCofins('PIS', i.pis, basePisCofins, v, servico ? 'vPISServ' : 'vPIS');
+  const cofins = gerarPisCofins('COFINS', i.cofins, basePisCofins, v, servico ? 'vCOFINSServ' : 'vCOFINS');
+
+  // Base do IBS/CBS (NT 2025.002): a operação sem os tributos que ainda coexistem
+  const baseIBSCBS = arred(
+    operacao + v.vII - v.vPIS - v.vPISServ - v.vCOFINS - v.vCOFINSServ -
+      v.vICMS - v.vFCP - v.vICMSUFDest - v.vFCPUFDest - v.vICMSMono - v.vISS,
+  );
+  const ibscbs = gerarIBSCBS(i.ibscbs, baseIBSCBS, item.quantidade, v);
+
+  v.vTotTrib = i.valorAproximadoTributos || 0;
+
+  const imposto = grupoObrigatorio('imposto',
+    tag('vTotTrib', opcional(v.vTotTrib)),
+    principal, pis, cofins, difal, ibscbs,
+  );
+
+  return {
+    imposto, valores: v, servico, difal: !!difal, ibscbs: !!ibscbs,
+    monoICMS: !servico && CST_MONOFASIA.includes(i.cst || ''),
+    monoIBSCBS: i.ibscbs?.cst === '620',
+  };
+}
+
+function gerarICMS(i: ImpostoItem, simples: boolean, operacao: number, quantidade: number, v: Valores): string {
   const origem = tag('orig', i.origem ?? 0);
+  const base = i.baseCalculo ?? arred(operacao * (1 - (i.reducaoBC || 0) / 100));
+  const icmsOperacao = i.valor ?? pct(base, i.aliquota);
+
+  const modBC = tag('modBC', i.modBC ?? 3);
+  const pRedBC = tag('pRedBC', num(i.reducaoBC, 4));
+  const pRedBCOpcional = tag('pRedBC', i.reducaoBC ? num(i.reducaoBC, 4) : undefined);
+
+  /** vBC, pICMS e vICMS, já lançando nos totais */
+  const proprio = (valor = icmsOperacao, meio = '') => {
+    v.vBC = base;
+    v.vICMS = valor;
+    return tag('vBC', num(base)) + meio + tag('pICMS', num(i.aliquota, 4));
+  };
+
+  const fcp = (comBase: boolean) => {
+    if (!i.aliquotaFCP) return '';
+    v.vFCP = pct(base, i.aliquotaFCP);
+    return (comBase ? tag('vBCFCP', num(base)) : '') + tag('pFCP', num(i.aliquotaFCP, 4)) + tag('vFCP', num(v.vFCP));
+  };
+
+  // ST: (operação + IPI) com MVA e redução; o imposto é o da ST menos o ICMS próprio
+  const st = (icmsProprio: number) => {
+    const baseST = i.baseCalculoST ?? arred(
+      (operacao + v.vIPI) * (1 + (i.mvaST || 0) / 100) * (1 - (i.reducaoBCST || 0) / 100),
+    );
+    v.vBCST = baseST;
+    v.vST = i.valorST ?? Math.max(0, arred(pct(baseST, i.aliquotaST) - icmsProprio));
+    let xml =
+      tag('modBCST', i.modBCST ?? 4) +
+      tag('pMVAST', i.mvaST ? num(i.mvaST, 4) : undefined) +
+      tag('pRedBCST', i.reducaoBCST ? num(i.reducaoBCST, 4) : undefined) +
+      tag('vBCST', num(baseST)) + tag('pICMSST', num(i.aliquotaST, 4)) + tag('vICMSST', num(v.vST));
+    if (i.aliquotaFCPST) {
+      v.vFCPST = pct(baseST, i.aliquotaFCPST);
+      xml += tag('vBCFCPST', num(baseST)) + tag('pFCPST', num(i.aliquotaFCPST, 4)) + tag('vFCPST', num(v.vFCPST));
+    }
+    return xml;
+  };
+
+  const desonerado = () => {
+    if (!i.valorDesonerado) return '';
+    v.vICMSDeson = arred(i.valorDesonerado);
+    if (i.deduzDesoneracao) v.vICMSDesonDeduzido = v.vICMSDeson;
+    return tag('vICMSDeson', num(i.valorDesonerado)) + tag('motDesICMS', i.motivoDesoneracao ?? 9) +
+      tag('indDeduzDeson', i.deduzDesoneracao ? 1 : 0);
+  };
+
+  const retido = () =>
+    i.baseSTRetido === undefined && i.valorSTRetido === undefined
+      ? ''
+      : tag('vBCSTRet', num(i.baseSTRetido)) + tag('pST', num(i.aliquotaSTRetido, 4)) +
+        tag('vICMSSubstituto', i.valorSubstituto !== undefined ? num(i.valorSubstituto) : undefined) +
+        tag('vICMSSTRet', num(i.valorSTRetido));
+
+  const credito = () =>
+    tag('pCredSN', num(i.aliquotaCredito, 4)) +
+    tag('vCredICMSSN', num(i.valorCredito ?? pct(operacao, i.aliquotaCredito)));
+
+  /** ICMS da nota com diferimento: o da operação menos a parte diferida */
+  const comDiferimento = () => {
+    if (!i.percentualDiferimento) return { valor: icmsOperacao, xml: '' };
+    const diferido = pct(icmsOperacao, i.percentualDiferimento);
+    return {
+      valor: arred(icmsOperacao - diferido),
+      xml: tag('vICMSOp', num(icmsOperacao)) + tag('pDif', num(i.percentualDiferimento, 4)) + tag('vICMSDif', num(diferido)),
+    };
+  };
 
   if (simples && i.csosn) {
     const csosn = tag('CSOSN', i.csosn);
     switch (i.csosn) {
       case '101':
-      case '201':
-        return grupoObrigatorio('ICMSSN101', origem, csosn,
-          tag('pCredSN', num(i.aliquotaCredito, 4)), tag('vCredICMSSN', num(i.valorCredito)));
+        return grupoObrigatorio('ICMSSN101', origem, csosn, credito());
       case '102':
       case '103':
       case '300':
       case '400':
         return grupoObrigatorio('ICMSSN102', origem, csosn);
+      case '201':
+        return grupoObrigatorio('ICMSSN201', origem, csosn, st(icmsOperacao), credito());
+      case '202':
+      case '203':
+        return grupoObrigatorio('ICMSSN202', origem, csosn, st(icmsOperacao));
       case '500':
-        return grupoObrigatorio('ICMSSN500', origem, csosn,
-          tag('vBCSTRet', i.baseCalculoST !== undefined ? num(i.baseCalculoST) : undefined),
-          tag('vICMSSTRet', i.valorST !== undefined ? num(i.valorST) : undefined));
-      case '900':
-        return grupoObrigatorio('ICMSSN900', origem, csosn,
-          tag('modBC', i.modBC), tag('vBC', num(i.baseCalculo)),
-          tag('pICMS', num(i.aliquota, 4)), tag('vICMS', num(i.valor)));
+        return grupoObrigatorio('ICMSSN500', origem, csosn, retido());
+      case '900': {
+        const icmsProprio = i.aliquota
+          ? modBC + proprio(icmsOperacao, pRedBCOpcional) + tag('vICMS', num(icmsOperacao))
+          : '';
+        return grupoObrigatorio('ICMSSN900', origem, csosn, icmsProprio,
+          i.aliquotaST ? st(v.vICMS) : '',
+          i.aliquotaCredito ? credito() : '',
+        );
+      }
       default:
-        return grupoObrigatorio('ICMSSN102', origem, tag('CSOSN', i.csosn));
+        throw new Error(`CSOSN ${i.csosn} não é tratado.`);
     }
   }
 
   const cst = i.cst || '00';
   const cstTag = tag('CST', cst);
+  const vICMS = () => tag('vICMS', num(v.vICMS));
 
   switch (cst) {
     case '00':
-      return grupoObrigatorio('ICMS00', origem, cstTag,
-        tag('modBC', i.modBC ?? 3), tag('vBC', num(i.baseCalculo)),
-        tag('pICMS', num(i.aliquota, 4)), tag('vICMS', num(i.valor)));
+      return grupoObrigatorio('ICMS00', origem, cstTag, modBC, proprio(), vICMS(), fcp(false));
+    case '10':
+      return grupoObrigatorio('ICMS10', origem, cstTag, modBC, proprio(), vICMS(), fcp(true), st(icmsOperacao));
     case '20':
-      return grupoObrigatorio('ICMS20', origem, cstTag,
-        tag('modBC', i.modBC ?? 3), tag('pRedBC', num(i.reducaoBC, 4)),
-        tag('vBC', num(i.baseCalculo)), tag('pICMS', num(i.aliquota, 4)), tag('vICMS', num(i.valor)));
+      return grupoObrigatorio('ICMS20', origem, cstTag, modBC, pRedBC, proprio(), vICMS(), fcp(true), desonerado());
+    case '30':
+      return grupoObrigatorio('ICMS30', origem, cstTag, st(icmsOperacao), desonerado());
     case '40':
     case '41':
     case '50':
-      return grupoObrigatorio('ICMS40', origem, cstTag);
-    case '51':
-      return grupoObrigatorio('ICMS51', origem, cstTag,
-        tag('modBC', i.modBC), tag('vBC', i.baseCalculo !== undefined ? num(i.baseCalculo) : undefined),
-        tag('pICMS', i.aliquota !== undefined ? num(i.aliquota, 4) : undefined),
-        tag('vICMS', i.valor !== undefined ? num(i.valor) : undefined));
+      return grupoObrigatorio('ICMS40', origem, cstTag, desonerado());
+    case '51': {
+      if (!i.aliquota) return grupoObrigatorio('ICMS51', origem, cstTag);
+      const d = comDiferimento();
+      return grupoObrigatorio('ICMS51', origem, cstTag, modBC, pRedBCOpcional,
+        proprio(d.valor), d.xml, vICMS(), fcp(true));
+    }
     case '60':
-      return grupoObrigatorio('ICMS60', origem, cstTag,
-        tag('vBCSTRet', i.baseCalculoST !== undefined ? num(i.baseCalculoST) : undefined),
-        tag('vICMSSTRet', i.valorST !== undefined ? num(i.valorST) : undefined));
-    case '10':
+      return grupoObrigatorio('ICMS60', origem, cstTag, retido());
+    // Monofasia: quantidade × alíquota ad rem (R$ por unidade)
+    case '02':
+      v.qBCMono = quantidade;
+      v.vICMSMono = arred(quantidade * (i.adRemICMS || 0));
+      return grupoObrigatorio('ICMS02', origem, cstTag,
+        tag('qBCMono', num(quantidade, 4)), tag('adRemICMS', num(i.adRemICMS, 4)), tag('vICMSMono', num(v.vICMSMono)));
+    case '15':
+      v.qBCMono = quantidade;
+      v.vICMSMono = arred(quantidade * (i.adRemICMS || 0));
+      v.qBCMonoReten = quantidade;
+      v.vICMSMonoReten = arred(quantidade * (i.adRemICMSReten || 0));
+      return grupoObrigatorio('ICMS15', origem, cstTag,
+        tag('qBCMono', num(quantidade, 4)), tag('adRemICMS', num(i.adRemICMS, 4)), tag('vICMSMono', num(v.vICMSMono)),
+        tag('qBCMonoReten', num(quantidade, 4)), tag('adRemICMSReten', num(i.adRemICMSReten, 4)),
+        tag('vICMSMonoReten', num(v.vICMSMonoReten)),
+        i.reducaoAdRem ? tag('pRedAdRem', num(i.reducaoAdRem)) + tag('motRedAdRem', i.motivoReducaoAdRem ?? 9) : '');
+    case '53': {
+      const operacaoMono = arred(quantidade * (i.adRemICMS || 0));
+      const diferido = pct(operacaoMono, i.percentualDiferimento);
+      v.qBCMono = quantidade;
+      v.vICMSMono = arred(operacaoMono - diferido);
+      return grupoObrigatorio('ICMS53', origem, cstTag,
+        tag('qBCMono', num(quantidade, 4)), tag('adRemICMS', num(i.adRemICMS, 4)),
+        tag('vICMSMonoOp', num(operacaoMono)),
+        i.percentualDiferimento ? tag('pDif', num(i.percentualDiferimento, 4)) + tag('vICMSMonoDif', num(diferido)) : '',
+        tag('vICMSMono', num(v.vICMSMono)));
+    }
+    case '61':
+      v.qBCMonoRet = quantidade;
+      v.vICMSMonoRet = arred(quantidade * (i.adRemICMSRet || 0));
+      return grupoObrigatorio('ICMS61', origem, cstTag,
+        tag('qBCMonoRet', num(quantidade, 4)), tag('adRemICMSRet', num(i.adRemICMSRet, 4)),
+        tag('vICMSMonoRet', num(v.vICMSMonoRet)));
     case '70':
-      return grupoObrigatorio(cst === '10' ? 'ICMS10' : 'ICMS70', origem, cstTag,
-        tag('modBC', i.modBC ?? 3),
-        cst === '70' ? tag('pRedBC', num(i.reducaoBC, 4)) : '',
-        tag('vBC', num(i.baseCalculo)), tag('pICMS', num(i.aliquota, 4)), tag('vICMS', num(i.valor)),
-        tag('modBCST', i.modBCST ?? 4), tag('pMVAST', num(i.mvaST, 4)),
-        tag('pRedBCST', i.reducaoBCST !== undefined ? num(i.reducaoBCST, 4) : undefined),
-        tag('vBCST', num(i.baseCalculoST)), tag('pICMSST', num(i.aliquotaST, 4)), tag('vICMSST', num(i.valorST)));
+      return grupoObrigatorio('ICMS70', origem, cstTag, modBC, pRedBC, proprio(), vICMS(), fcp(true),
+        st(icmsOperacao), desonerado());
+    case '90': {
+      let icmsProprio = '';
+      if (i.aliquota) {
+        const d = comDiferimento();
+        icmsProprio = modBC + proprio(d.valor, pRedBCOpcional) + d.xml + vICMS() + fcp(true);
+      }
+      return grupoObrigatorio('ICMS90', origem, cstTag, icmsProprio,
+        i.aliquotaST ? st(v.vICMS) : '', desonerado());
+    }
     default:
-      return grupoObrigatorio('ICMS90', origem, cstTag,
-        tag('modBC', i.modBC ?? 3), tag('vBC', num(i.baseCalculo)),
-        tag('pICMS', num(i.aliquota, 4)), tag('vICMS', num(i.valor)));
+      throw new Error(`CST ${cst} do ICMS não é tratado.`);
   }
 }
 
-function gerarPisCofins(nome: 'PIS' | 'COFINS', d: { cst: string; base?: number; aliquota?: number; valor?: number }): string {
+function gerarPisCofins(
+  nome: 'PIS' | 'COFINS',
+  d: TributoPisCofins,
+  base: number,
+  v: Valores,
+  campo: 'vPIS' | 'vCOFINS' | 'vPISServ' | 'vCOFINSServ',
+): string {
   const cst = d?.cst || '07';
   const aliquota = nome === 'PIS' ? 'pPIS' : 'pCOFINS';
   const valorTag = nome === 'PIS' ? 'vPIS' : 'vCOFINS';
 
-  // 01/02 = tributado por alíquota; 03 = por quantidade; 04 a 09 = sem cálculo; 49+ = outras
-  if (['01', '02'].includes(cst)) {
-    return grupoObrigatorio(nome, grupoObrigatorio(`${nome}Aliq`,
-      tag('CST', cst), tag('vBC', num(d.base)), tag(aliquota, num(d.aliquota, 4)), tag(valorTag, num(d.valor))));
-  }
-  if (['49', '50', '51', '52', '53', '54', '55', '56', '60', '61', '62', '63', '64', '65', '66', '67', '70', '71', '72', '73', '74', '75', '98', '99'].includes(cst)) {
-    return grupoObrigatorio(nome, grupoObrigatorio(`${nome}Outr`,
-      tag('CST', cst), tag('vBC', num(d.base)), tag(aliquota, num(d.aliquota, 4)), tag(valorTag, num(d.valor))));
+  // 01/02 = tributado por alíquota; 04 a 09 = sem cálculo; 49+ = outras
+  const outras = ['49', '50', '51', '52', '53', '54', '55', '56', '60', '61', '62', '63', '64', '65', '66', '67', '70', '71', '72', '73', '74', '75', '98', '99'];
+  if (['01', '02'].includes(cst) || outras.includes(cst)) {
+    const b = d.base ?? base;
+    v[campo] = d.valor ?? pct(b, d.aliquota);
+    return grupoObrigatorio(nome, grupoObrigatorio(`${nome}${outras.includes(cst) ? 'Outr' : 'Aliq'}`,
+      tag('CST', cst), tag('vBC', num(b)), tag(aliquota, num(d.aliquota, 4)), tag(valorTag, num(v[campo]))));
   }
   return grupoObrigatorio(nome, grupoObrigatorio(`${nome}NT`, tag('CST', cst)));
 }
 
-function gerarIPI(ipi?: ImpostoItem['ipi']): string {
+function gerarIPI(ipi: ImpostoItem['ipi'], operacao: number, v: Valores): string {
   if (!ipi?.cst) return '';
   const tributado = ['00', '49', '50', '99'].includes(ipi.cst);
+  const cEnq = tag('cEnq', ipi.codigoEnquadramento || '999');
+  if (!tributado) return grupoObrigatorio('IPI', cEnq, grupoObrigatorio('IPINT', tag('CST', ipi.cst)));
 
-  return grupoObrigatorio('IPI',
-    tag('cEnq', ipi.codigoEnquadramento || '999'),
-    tributado
-      ? grupoObrigatorio('IPITrib', tag('CST', ipi.cst), tag('vBC', num(ipi.base)),
-          tag('pIPI', num(ipi.aliquota, 4)), tag('vIPI', num(ipi.valor)))
-      : grupoObrigatorio('IPINT', tag('CST', ipi.cst)));
+  const base = ipi.base ?? operacao;
+  v.vIPI = ipi.valor ?? pct(base, ipi.aliquota);
+  return grupoObrigatorio('IPI', cEnq,
+    grupoObrigatorio('IPITrib', tag('CST', ipi.cst), tag('vBC', num(base)),
+      tag('pIPI', num(ipi.aliquota, 4)), tag('vIPI', num(v.vIPI))));
+}
+
+function gerarII(ii: ImpostoItem['ii'], v: Valores): string {
+  if (!ii) return '';
+  v.vII = arred(ii.valor || 0);
+  return grupoObrigatorio('II',
+    tag('vBC', num(ii.base)), tag('vDespAdu', num(ii.despesasAduaneiras)),
+    tag('vII', num(ii.valor)), tag('vIOF', num(ii.iof)));
+}
+
+function gerarISSQN(s: NonNullable<ImpostoItem['issqn']>, operacao: number, municipio: string, v: Valores): string {
+  v.vBCISS = s.base ?? operacao;
+  v.vISS = s.valor ?? pct(v.vBCISS, s.aliquota);
+  v.vISSRet = s.valorRetido || 0;
+  return grupoObrigatorio('ISSQN',
+    tag('vBC', num(v.vBCISS)),
+    tag('vAliq', num(s.aliquota, 4)),
+    tag('vISSQN', num(v.vISS)),
+    tag('cMunFG', s.municipio || municipio),
+    tag('cListServ', s.codigoServico),
+    tag('vISSRet', opcional(v.vISSRet)),
+    tag('indISS', s.exigibilidade ?? 1),
+    tag('indIncentivo', s.incentivo ? 1 : 2),
+  );
+}
+
+function gerarDIFAL(
+  d: NonNullable<ImpostoItem['difal']>,
+  operacao: number,
+  aliquotaICMS: number | undefined,
+  v: Valores,
+): string {
+  const base = d.base ?? operacao;
+  const interestadual = Number(d.aliquotaInterestadual ?? aliquotaICMS);
+  if (![4, 7, 12].includes(interestadual)) {
+    throw new Error('DIFAL: a alíquota interestadual do item precisa ser 4, 7 ou 12%.');
+  }
+  v.vICMSUFDest = pct(base, Math.max(0, d.aliquotaInterna - interestadual));
+  v.vFCPUFDest = pct(base, d.aliquotaFCP);
+  // Desde 2019 a partilha é 100% da UF de destino
+  return grupoObrigatorio('ICMSUFDest',
+    tag('vBCUFDest', num(base)),
+    d.aliquotaFCP ? tag('vBCFCPUFDest', num(base)) + tag('pFCPUFDest', num(d.aliquotaFCP, 4)) : '',
+    tag('pICMSUFDest', num(d.aliquotaInterna, 4)),
+    tag('pICMSInter', num(interestadual)),
+    tag('pICMSInterPart', num(100, 4)),
+    d.aliquotaFCP ? tag('vFCPUFDest', num(v.vFCPUFDest)) : '',
+    tag('vICMSUFDest', num(v.vICMSUFDest)),
+    tag('vICMSUFRemet', num(0)),
+  );
+}
+
+function gerarIBSCBS(t: ImpostoItem['ibscbs'], base: number, quantidade: number, v: Valores): string {
+  if (!t?.cst) return '';
+  if (CST_IBSCBS_NAO_TRATADOS.includes(t.cst)) {
+    throw new Error(`CST ${t.cst} do IBS/CBS ainda não é tratado.`);
+  }
+  const cabecalho = tag('CST', t.cst) + tag('cClassTrib', t.classificacao);
+  if (CST_IBSCBS_SEM_VALORES.includes(t.cst)) return grupoObrigatorio('IBSCBS', cabecalho);
+  if (t.cst === '620') return grupoObrigatorio('IBSCBS', cabecalho, gerarIBSCBSMono(t.monofasia || {}, quantidade, v));
+
+  const b = t.base ?? base;
+  v.vBCIBSCBS = b;
+
+  // Cada esfera: alíquota, parte diferida, redução e valor, na ordem do schema
+  const esfera = (sufixo: 'IBSUF' | 'IBSMun' | 'CBS', aliquota = 0) => {
+    const efetiva = t.reducao ? arred(aliquota * (1 - t.reducao / 100), 4) : aliquota;
+    const cheio = pct(b, efetiva);
+    const diferido = t.diferimento ? pct(cheio, t.diferimento) : 0;
+    const valor = arred(cheio - diferido);
+    const xml =
+      tag(`p${sufixo}`, num(aliquota, 4)) +
+      (t.diferimento ? grupoObrigatorio('gDif', tag('pDif', num(t.diferimento, 4)), tag('vDif', num(diferido))) : '') +
+      (t.reducao ? grupoObrigatorio('gRed', tag('pRedAliq', num(t.reducao, 4)), tag('pAliqEfet', num(efetiva, 4))) : '') +
+      tag(`v${sufixo}`, num(valor));
+    return { valor, diferido, xml };
+  };
+
+  const uf = esfera('IBSUF', t.aliquotaIBSUF);
+  const mun = esfera('IBSMun', t.aliquotaIBSMun);
+  const cbs = esfera('CBS', t.aliquotaCBS);
+  v.vIBSUF = uf.valor;
+  v.vDifIBSUF = uf.diferido;
+  v.vIBSMun = mun.valor;
+  v.vDifIBSMun = mun.diferido;
+  v.vCBS = cbs.valor;
+  v.vDifCBS = cbs.diferido;
+
+  return grupoObrigatorio('IBSCBS', cabecalho,
+    grupoObrigatorio('gIBSCBS',
+      tag('vBC', num(b)),
+      grupoObrigatorio('gIBSUF', uf.xml),
+      grupoObrigatorio('gIBSMun', mun.xml),
+      tag('vIBS', num(uf.valor + mun.valor)),
+      grupoObrigatorio('gCBS', cbs.xml),
+    ),
+  );
+}
+
+/**
+ * gIBSCBSMono, só ad rem (combustíveis): padrão, retenção e retido anteriormente.
+ * ponytail: ad valorem e diferença do biocombustível ficam de fora até alguém emitir
+ */
+function gerarIBSCBSMono(m: NonNullable<NonNullable<ImpostoItem['ibscbs']>['monofasia']>, q: number, v: Valores): string {
+  const tributo = (nome: 'IBS' | 'CBS', adRem?: number, adRemReten?: number, retido?: number) => {
+    const valor = adRem !== undefined ? arred(q * adRem) : 0;
+    const reten = adRemReten !== undefined ? arred(q * adRemReten) : 0;
+    v[`v${nome}Mono`] = valor;
+    v[`v${nome}MonoReten`] = reten;
+    v[`v${nome}MonoRet`] = retido || 0;
+    const xml = grupo(`g${nome}MonoAdRem`,
+      adRem !== undefined
+        ? grupoObrigatorio('gMonoPadrao', tag('qBCMono', num(q, 4)), tag(`adRem${nome}`, num(adRem, 4)), tag(`v${nome}Mono`, num(valor)))
+        : '',
+      adRemReten !== undefined
+        ? grupoObrigatorio('gMonoReten', tag('qBCMonoReten', num(q, 4)), tag(`adRem${nome}Reten`, num(adRemReten, 4)),
+            tag(`v${nome}MonoReten`, num(reten)))
+        : '',
+      retido ? grupoObrigatorio('gMonoRet', tag(`v${nome}MonoRet`, num(retido))) : '',
+    );
+    return { xml, total: arred(valor + reten) };
+  };
+
+  const ibs = tributo('IBS', m.adRemIBS, m.adRemIBSReten, m.valorIBSRetido);
+  const cbs = tributo('CBS', m.adRemCBS, m.adRemCBSReten, m.valorCBSRetido);
+  return grupoObrigatorio('gIBSCBSMono', ibs.xml, cbs.xml,
+    tag('vTotIBSMonoItem', num(ibs.total)), tag('vTotCBSMonoItem', num(cbs.total)));
 }
 
 // ---------------------------------------------------------------------------
@@ -336,14 +804,14 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
     codigoNumerico: doc.ide.codigoNumerico,
   });
 
-  const totais = somarTotais(doc.itens);
-
   // Em homologação a razão social do destinatário é obrigatoriamente esta frase
   const homologacao = ambiente === 2;
   const dest = doc.destinatario;
 
   // Indicadores calculados uma vez só: a regra abaixo e o XML usam os mesmos valores
-  const idDest = doc.ide.idDestino ?? 1;
+  // Sem indicação, o destino sai da UF do destinatário: EX = exterior, outra UF = interestadual
+  const ufDestino = dest?.endereco?.uf?.toUpperCase();
+  const idDest = doc.ide.idDestino ?? (nfce || !ufDestino ? 1 : ufDestino === 'EX' ? 3 : ufDestino !== emit.uf.toUpperCase() ? 2 : 1);
   const indFinal = doc.ide.consumidorFinal ?? (nfce ? 1 : 0);
   const indIEDest = dest ? dest.indIEDest ?? (dest.inscricaoEstadual ? 1 : 9) : undefined;
 
@@ -356,6 +824,21 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
       'Destinatário não contribuinte (indicador de IE = 9) exige "Consumidor final = Sim" ' +
         '(rejeição 696 da SEFAZ). A exceção é a operação com o exterior.',
     );
+  }
+
+  const calculados = doc.itens.map((item, n) =>
+    calcularItem(item, n, {
+      simples,
+      consumidorFinal: indFinal === 1,
+      difal: idDest === 2 && indFinal === 1 && indIEDest === 9,
+      municipioEmitente: emit.codigo_municipio,
+    }),
+  );
+  const totais = totalizar(calculados);
+
+  const inscricaoMunicipal = (cfg.geral.inscricaoMunicipal || '').replace(/\s/g, '');
+  if (totais.temServico && !inscricaoMunicipal) {
+    throw new Error('Item de serviço (ISSQN) exige a inscrição municipal do emitente em Configurações › Geral.');
   }
 
   // ----- ide -----
@@ -401,6 +884,7 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
       tag('fone', (emit.fone || '').replace(/\D/g, '')),
     ),
     tag('IE', (emit.inscricao_estadual || '').replace(/\D/g, '') || 'ISENTO'),
+    inscricaoMunicipal ? tag('IM', inscricaoMunicipal) + tag('CNAE', cfg.geral.cnae?.replace(/\D/g, '')) : '',
     tag('CRT', emit.crt),
   );
 
@@ -468,14 +952,18 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
         item.valorDesconto ? tag('vDesc', num(item.valorDesconto)) : '',
         item.valorOutros ? tag('vOutro', num(item.valorOutros)) : '',
         tag('indTot', item.compoeTotal === false ? 0 : 1),
+        gerarDI(item.di),
+        item.combustivel
+          ? grupoObrigatorio('comb',
+              tag('cProdANP', item.combustivel.codigoANP),
+              tag('descANP', limparTexto(item.combustivel.descricaoANP, 95)),
+              tag('UFCons', item.combustivel.ufConsumo || dest?.endereco?.uf || emit.uf),
+              tag('pBio', item.combustivel.percentualBio ? num(item.combustivel.percentualBio, 4) : undefined),
+            )
+          : '',
       );
 
-      const imposto = grupoObrigatorio('imposto',
-        grupoObrigatorio('ICMS', gerarICMS(item.imposto, simples)),
-        gerarIPI(item.imposto.ipi),
-        gerarPisCofins('PIS', item.imposto.pis),
-        gerarPisCofins('COFINS', item.imposto.cofins),
-      );
+      const { imposto } = calculados[indice];
 
       return `<det nItem="${indice + 1}">${prod}${imposto}${
         tag('infAdProd', limparTexto(item.informacoesAdicionais || '', 500))
@@ -484,28 +972,75 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
     .join('');
 
   // ----- total -----
+  const temDifal = totais.temDifal;
   const total = grupoObrigatorio('total',
     grupoObrigatorio('ICMSTot',
       tag('vBC', num(totais.vBC)),
       tag('vICMS', num(totais.vICMS)),
       tag('vICMSDeson', num(totais.vICMSDeson)),
+      temDifal ? tag('vFCPUFDest', num(totais.vFCPUFDest)) : '',
+      temDifal ? tag('vICMSUFDest', num(totais.vICMSUFDest)) : '',
+      temDifal ? tag('vICMSUFRemet', num(0)) : '',
       tag('vFCP', num(totais.vFCP)),
       tag('vBCST', num(totais.vBCST)),
       tag('vST', num(totais.vST)),
       tag('vFCPST', num(totais.vFCPST)),
-      tag('vFCPSTRet', num(totais.vFCPSTRet)),
+      tag('vFCPSTRet', num(0)),
+      ...(totais.temMonoICMS
+        ? [
+            tag('qBCMono', num(totais.qBCMono)), tag('vICMSMono', num(totais.vICMSMono)),
+            tag('qBCMonoReten', num(totais.qBCMonoReten)), tag('vICMSMonoReten', num(totais.vICMSMonoReten)),
+            tag('qBCMonoRet', num(totais.qBCMonoRet)), tag('vICMSMonoRet', num(totais.vICMSMonoRet)),
+          ]
+        : []),
       tag('vProd', num(totais.vProd)),
       tag('vFrete', num(totais.vFrete)),
       tag('vSeg', num(totais.vSeg)),
       tag('vDesc', num(totais.vDesc)),
       tag('vII', num(totais.vII)),
       tag('vIPI', num(totais.vIPI)),
-      tag('vIPIDevol', num(totais.vIPIDevol)),
+      tag('vIPIDevol', num(0)),
       tag('vPIS', num(totais.vPIS)),
       tag('vCOFINS', num(totais.vCOFINS)),
       tag('vOutro', num(totais.vOutro)),
       tag('vNF', num(totais.vNF)),
+      tag('vTotTrib', opcional(totais.vTotTrib)),
     ),
+    totais.temServico
+      ? grupoObrigatorio('ISSQNtot',
+          tag('vServ', opcional(totais.vServ)),
+          tag('vBC', opcional(totais.vBCISS)),
+          tag('vISS', opcional(totais.vISS)),
+          tag('vPIS', opcional(totais.vPISServ)),
+          tag('vCOFINS', opcional(totais.vCOFINSServ)),
+          tag('dCompet', dataISO(emissao)),
+          tag('vISSRet', opcional(totais.vISSRet)),
+        )
+      : '',
+    totais.temIBSCBS
+      ? grupoObrigatorio('IBSCBSTot',
+          tag('vBCIBSCBS', num(totais.vBCIBSCBS)),
+          grupoObrigatorio('gIBS',
+            grupoObrigatorio('gIBSUF',
+              tag('vDif', num(totais.vDifIBSUF)), tag('vDevTrib', num(0)), tag('vIBSUF', num(totais.vIBSUF))),
+            grupoObrigatorio('gIBSMun',
+              tag('vDif', num(totais.vDifIBSMun)), tag('vDevTrib', num(0)), tag('vIBSMun', num(totais.vIBSMun))),
+            tag('vIBS', num(totais.vIBSUF + totais.vIBSMun)),
+            tag('vCredPres', num(0)),
+            tag('vCredPresCondSus', num(0)),
+          ),
+          grupoObrigatorio('gCBS',
+            tag('vDif', num(totais.vDifCBS)), tag('vDevTrib', num(0)), tag('vCBS', num(totais.vCBS)),
+            tag('vCredPres', num(0)), tag('vCredPresCondSus', num(0))),
+          totais.temMonoIBSCBS
+            ? grupoObrigatorio('gMono',
+                tag('vIBSMono', num(totais.vIBSMono)), tag('vCBSMono', num(totais.vCBSMono)),
+                tag('vIBSMonoReten', num(totais.vIBSMonoReten)), tag('vCBSMonoReten', num(totais.vCBSMonoReten)),
+                tag('vIBSMonoRet', num(totais.vIBSMonoRet)), tag('vCBSMonoRet', num(totais.vCBSMonoRet)),
+              )
+            : '',
+        )
+      : '',
   );
 
   // ----- transp -----
@@ -543,7 +1078,7 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
   // ----- pag -----
   const pagamentos = doc.pagamentos?.length
     ? doc.pagamentos
-    : [{ forma: '90', valor: totais.vNF } as Pagamento];
+    : [{ forma: '90' } as Pagamento];
 
   const pag = grupoObrigatorio('pag',
     pagamentos
@@ -552,7 +1087,8 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
           p.indPag !== undefined ? tag('indPag', p.indPag) : '',
           tag('tPag', p.forma),
           p.forma === '99' ? tag('xPag', limparTexto(p.descricao || 'Outros', 60)) : '',
-          tag('vPag', num(p.valor)),
+          // Sem valor informado, o pagamento cobre a nota inteira ("90 — Sem pagamento" é sempre zero)
+          tag('vPag', num(p.forma === '90' ? 0 : p.valor ?? totais.vNF)),
         ),
       )
       .join(''),
@@ -589,13 +1125,39 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
   const suplementar = nfce
     ? grupoObrigatorio('infNFeSupl',
         `<qrCode><![CDATA[${qrCode(ctx, chave, totais, emissao, tipoEmissao)}]]></qrCode>`,
-        `<urlChave>${urlsConsulta('NFCe', emit.uf, ambiente).consulta}</urlChave>`,
+        `<urlChave>${urlsConsulta('NFCe', emit.uf, ambiente, versaoQRCode(ctx)).consulta}</urlChave>`,
       )
     : '';
 
   const xml = `${DECLARACAO}<NFe xmlns="${NS_NFE}">${infNFe}${suplementar}</NFe>`;
 
   return { xml, chave, numero: doc.ide.numero, serie: doc.ide.serie, modelo, totais };
+}
+
+function gerarDI(di?: DeclaracaoImportacao): string {
+  if (!di) return '';
+  return grupoObrigatorio('DI',
+    tag('nDI', limparTexto(di.numero, 15)),
+    tag('dDI', di.data),
+    tag('xLocDesemb', limparTexto(di.localDesembaraco, 60)),
+    tag('UFDesemb', di.ufDesembaraco),
+    tag('dDesemb', di.dataDesembaraco),
+    tag('tpViaTransp', di.viaTransporte),
+    tag('vAFRMM', di.afrmm !== undefined ? num(di.afrmm) : undefined),
+    tag('tpIntermedio', di.intermedio),
+    tag('CNPJ', di.cnpjAdquirente?.replace(/\D/g, '')),
+    tag('UFTerceiro', di.ufTerceiro),
+    tag('cExportador', limparTexto(di.codigoExportador, 60)),
+    ...(di.adicoes || []).map((a) =>
+      grupoObrigatorio('adi',
+        tag('nAdicao', a.numero),
+        tag('nSeqAdic', a.sequencia),
+        tag('cFabricante', limparTexto(a.fabricante, 60)),
+        tag('vDescDI', a.desconto ? num(a.desconto) : undefined),
+        tag('nDraw', a.drawback),
+      ),
+    ),
+  );
 }
 
 /** hashCSRT = SHA-1 do CSRT + chave, em base64 (NT 2018.005) */
@@ -608,6 +1170,11 @@ function hashCSRT(csrt: string, chave: string): string {
  * Em emissão online a entrada é chave|versao|tpAmb|; offline (tpEmis 9) inclui
  * o dia da emissão, o valor e o digest.
  */
+/** Versão do QR-Code escolhida nas Configurações; a 2 é a vigente desde 2019 */
+function versaoQRCode(ctx: Contexto): number {
+  return Number(ctx.config.geral.versaoQRCode) || VERSAO_QRCODE;
+}
+
 function qrCode(
   ctx: Contexto,
   chave: string,
@@ -617,10 +1184,11 @@ function qrCode(
 ): string {
   const cfg = ctx.config.geral;
   const ambiente = ctx.config.webservice.ambiente;
-  const urlBase = urlsConsulta('NFCe', ctx.emitente.uf, ambiente).qrCode;
+  const versao = versaoQRCode(ctx);
+  const urlBase = urlsConsulta('NFCe', ctx.emitente.uf, ambiente, versao).qrCode;
   const idCSC = String(Number(cfg.idCSC || 0));
 
-  let entrada = `${chave}|2|${ambiente}|`;
+  let entrada = `${chave}|${versao}|${ambiente}|`;
   if (tipoEmissao === 9) {
     const dia = String(emissao.getDate()).padStart(2, '0');
     // O digest só existe depois de assinar; na emissão offline a NFC-e vai sem ele
