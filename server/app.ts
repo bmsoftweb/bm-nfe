@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { pool, checkDbHealth, CONFIG_FALTANDO, MENSAGEM_CONFIG_FALTANDO } from './db.js';
 import { criarRotasNFe } from './rotas/nfe.js';
+import { criarRotasEmitir } from './rotas/emitir.js';
 import { carregarCertificado } from './nfe/contexto.js';
 import { lerConfig } from './config.js';
 import { criarToken, exigirSessao } from './auth.js';
@@ -194,6 +195,7 @@ export function createApp() {
   });
 
   app.use('/api', criarRotasNFe());
+  app.use('/api', criarRotasEmitir());
 
   return app;
 }

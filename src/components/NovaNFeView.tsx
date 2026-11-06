@@ -172,6 +172,8 @@ export const NovaNFeView: React.FC<{
   }, [serie]);
 
   const [chaveGerada, setChaveGerada] = useState('');
+  // Linha gravada pelo primeiro "Gerar" desta tela; os seguintes regravam a mesma
+  const [idGerado, setIdGerado] = useState<number | undefined>();
   const [totalNota, setTotalNota] = useState<number | null>(null);
   const [removendoItem, setRemovendoItem] = useState<number | null>(null);
   const [confirmandoEnvio, setConfirmandoEnvio] = useState(false);
@@ -254,8 +256,10 @@ export const NovaNFeView: React.FC<{
   const gerar = async () => {
     setErro(null);
     try {
-      // Na edição o servidor regrava a mesma linha, em vez de criar uma segunda nota
-      const resposta = await api.gerarNFe(montarDocumento(), edicao?.id);
+      // Na edição, e a partir do segundo "Gerar" de uma nota nova, o servidor regrava a
+      // mesma linha: o número é único por série e não pode virar uma segunda nota
+      const resposta = await api.gerarNFe(montarDocumento(), edicao?.id ?? idGerado);
+      setIdGerado(resposta.documentoId);
       setChaveGerada(resposta.chave);
       setTotalNota(resposta.totais?.vNF ?? null);
     } catch (err: any) {

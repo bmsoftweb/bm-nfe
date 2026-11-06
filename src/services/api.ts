@@ -99,7 +99,7 @@ export const consultarCadastro = (dados: { uf: string; cnpj?: string; cpf?: stri
 
 /** Com `documentoId`, regrava a nota existente (edição de assinada ou rejeitada) em vez de criar outra */
 export const gerarNFe = (documento: any, documentoId?: number) =>
-  post<{ success: boolean; chave: string; totais: any; xml: string }>('/gerar', { documento, documentoId });
+  post<{ success: boolean; chave: string; totais: any; xml: string; documentoId: number }>('/gerar', { documento, documentoId });
 
 export const enviarNFe = (dados: { chave?: string; xml?: string; sincrono?: boolean }) =>
   post<Retorno>('/enviar', dados);

@@ -88,11 +88,13 @@ CREATE TABLE IF NOT EXISTS nfe_certificados (
 CREATE TABLE IF NOT EXISTS nfe_documentos (
   id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   empresa_id     INT UNSIGNED NOT NULL,
+  -- referência do módulo de origem no concentrador (POST /api/emitir); nula nas notas da tela
+  referencia     VARCHAR(80)  NULL,
   chave          VARCHAR(44)  NULL,
   modelo         CHAR(2)      NOT NULL DEFAULT '55',
   serie          INT          NOT NULL,
   numero         INT          NOT NULL,
-  -- rascunho | assinada | enviada | autorizada | rejeitada | cancelada | denegada
+  -- rascunho | assinada | processando | enviada | autorizada | rejeitada | cancelada | denegada
   situacao       VARCHAR(20)  NOT NULL DEFAULT 'rascunho',
   ambiente       TINYINT      NOT NULL DEFAULT 2,
   data_emissao   DATETIME     NULL,
@@ -110,9 +112,24 @@ CREATE TABLE IF NOT EXISTS nfe_documentos (
   atualizado_em  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_nfe_documentos_chave (empresa_id, chave),
-  KEY ix_nfe_documentos_numero (empresa_id, modelo, serie, numero),
+  UNIQUE KEY uq_nfe_documentos_numero (empresa_id, modelo, serie, ambiente, numero),
+  UNIQUE KEY uq_nfe_documentos_referencia (empresa_id, referencia),
   KEY ix_nfe_documentos_situacao (empresa_id, situacao),
   CONSTRAINT fk_nfe_documentos_empresa FOREIGN KEY (empresa_id) REFERENCES nfe_empresas (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------
+-- Contador de numeração por série (doc/plano-concentrador.md, fase 1)
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS nfe_numeracao (
+  empresa_id     INT UNSIGNED NOT NULL,
+  modelo         CHAR(2)      NOT NULL,
+  serie          INT          NOT NULL,
+  ambiente       TINYINT      NOT NULL,
+  ultimo_numero  INT          NOT NULL,
+  atualizado_em  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (empresa_id, modelo, serie, ambiente),
+  CONSTRAINT fk_nfe_numeracao_empresa FOREIGN KEY (empresa_id) REFERENCES nfe_empresas (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------------------------------------------------------------

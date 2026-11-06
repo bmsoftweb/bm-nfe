@@ -18,6 +18,7 @@ import { CONFIG_PADRAO } from '../config.js';
 import { chaveValida } from './chave.js';
 import { semDeclaracao } from './xml.js';
 import { montarEvento, montarInutilizacao, PedidoEvento, ufDaNota } from './operacoes.js';
+import { decidir, PRAZO_PROCESSANDO_S, situacaoPeloStatus, validarReferencia } from './concentrador.js';
 import {
   FalhaSchema, ResultadoValidacao, exigirValido, validarEvento, validarInutilizacao, validarNFe, validarQualquer,
 } from './validacao.js';
@@ -667,6 +668,31 @@ async function principal() {
     });
     const r = await validarInutilizacao(inut);
     assert.ok(r.valido, semErros(r));
+  });
+
+  // --- Concentrador: a decisão que, se errar, gera nota duplicada ------------
+
+  await conferir('concentrador: cada situação da referência leva à ação certa', async () => {
+    assert.strictEqual(decidir(undefined, 0), 'nova');
+    for (const s of ['rascunho', 'assinada', 'rejeitada']) assert.strictEqual(decidir(s, 0), 'gerar', s);
+    assert.strictEqual(decidir('processando', 5), 'ocupada');
+    // Processo que caiu no meio: depois do prazo vira "enviada sem resposta", nunca "gerar"
+    assert.strictEqual(decidir('processando', PRAZO_PROCESSANDO_S), 'verificar');
+    assert.strictEqual(decidir('enviada', 0), 'verificar');
+    assert.strictEqual(decidir('autorizada', 0), 'devolver');
+    for (const s of ['cancelada', 'denegada']) assert.strictEqual(decidir(s, 0), 'usada', s);
+  });
+
+  await conferir('concentrador: cStat do protocolo e da consulta viram a situação certa', async () => {
+    assert.strictEqual(situacaoPeloStatus(100), 'autorizada');
+    assert.strictEqual(situacaoPeloStatus(150), 'autorizada');
+    assert.strictEqual(situacaoPeloStatus(101), 'cancelada');
+    assert.strictEqual(situacaoPeloStatus(110), 'denegada');
+    assert.strictEqual(situacaoPeloStatus(302), 'denegada');
+    assert.strictEqual(situacaoPeloStatus(539), 'rejeitada');
+    assert.strictEqual(validarReferencia('  PDV-000123 '), 'PDV-000123');
+    assert.throws(() => validarReferencia(''), /referência/);
+    assert.throws(() => validarReferencia('x'.repeat(81)), /referência/);
   });
 
   await conferir('validarQualquer reconhece o tipo pela raiz', async () => {

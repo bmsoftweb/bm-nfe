@@ -18,6 +18,7 @@ import { chaveValida } from '../nfe/chave.js';
 import { dataHoraMysql, paraBR } from '../nfe/datas.js';
 import { recortarElemento, semDeclaracao, valorTag } from '../nfe/xml.js';
 import { FalhaSchema, exigirValido, validarNFe, validarQualquer } from '../nfe/validacao.js';
+import { proximoNumero } from '../nfe/numeracao.js';
 import {
   autorizar,
   consultarCadastro,
@@ -56,7 +57,7 @@ function exigirEditavel(situacao: string) {
  * A empresa vem da sessão validada pelo exigirSessao — nunca de um header, que o
  * cliente poderia trocar para agir em nome de outro emitente.
  */
-function empresaDaRequisicao(req: Request): number {
+export function empresaDaRequisicao(req: Request): number {
   const id = req.usuario?.empresaId;
   if (!id) throw new Error('Sessão sem empresa. Entre novamente.');
   return id;
@@ -66,7 +67,7 @@ function empresaDaRequisicao(req: Request): number {
  * Envolve o handler para que toda exceção vire um 400 com a mensagem em português.
  * Falha de schema sai como 422 e leva a lista de erros, para a tela mostrar campo a campo.
  */
-function rota(handler: (req: Request, res: Response) => Promise<any>) {
+export function rota(handler: (req: Request, res: Response) => Promise<any>) {
   return async (req: Request, res: Response) => {
     try {
       await handler(req, res);
@@ -269,47 +270,58 @@ export function criarRotasNFe(): Router {
     const dest = documento.destinatario;
     const destinatarioDocumento = (dest?.cnpj || dest?.cpf || '').replace(/\D/g, '') || null;
 
-    if (documentoId) {
-      // Edição regrava o MESMO registro: a nota corrigida não vira uma segunda linha.
-      // A chave muda (o código numérico é novo) e o retorno da rejeição anterior é
-      // limpo; o histórico dela continua no nfe_log. A condição na situação protege
-      // contra alguém ter transmitido a nota entre abrir a edição e gerar.
-      const [resultado] = await pool.query<any>(
-        `UPDATE nfe_documentos
-            SET chave = ?, modelo = ?, serie = ?, numero = ?, situacao = 'assinada', ambiente = ?,
-                data_emissao = ?, destinatario_documento = ?, destinatario_nome = ?, valor_total = ?,
-                dados = CAST(? AS JSON), xml = ?,
-                recibo = NULL, protocolo = NULL, codigo_status = NULL, motivo = NULL, xml_protocolo = NULL
-          WHERE id = ? AND empresa_id = ? AND situacao IN (${SITUACOES_EDITAVEIS.map(() => '?').join(', ')})`,
-        [
-          gerada.chave, gerada.modelo, gerada.serie, gerada.numero, ctx.config.webservice.ambiente,
-          dataHoraMysql(), destinatarioDocumento, dest?.nome || null, gerada.totais.vNF,
-          JSON.stringify(documento), xml,
-          documentoId, empresaId, ...SITUACOES_EDITAVEIS,
-        ],
-      );
-      if (!resultado.affectedRows) {
-        throw new Error('A nota mudou de situação enquanto era editada. Recarregue a lista e confira.');
+    let gravado = documentoId;
+    try {
+      if (documentoId) {
+        // Edição regrava o MESMO registro: a nota corrigida não vira uma segunda linha.
+        // A chave muda (o código numérico é novo) e o retorno da rejeição anterior é
+        // limpo; o histórico dela continua no nfe_log. A condição na situação protege
+        // contra alguém ter transmitido a nota entre abrir a edição e gerar.
+        const [resultado] = await pool.query<any>(
+          `UPDATE nfe_documentos
+              SET chave = ?, modelo = ?, serie = ?, numero = ?, situacao = 'assinada', ambiente = ?,
+                  data_emissao = ?, destinatario_documento = ?, destinatario_nome = ?, valor_total = ?,
+                  dados = CAST(? AS JSON), xml = ?,
+                  recibo = NULL, protocolo = NULL, codigo_status = NULL, motivo = NULL, xml_protocolo = NULL
+            WHERE id = ? AND empresa_id = ? AND situacao IN (${SITUACOES_EDITAVEIS.map(() => '?').join(', ')})`,
+          [
+            gerada.chave, gerada.modelo, gerada.serie, gerada.numero, ctx.config.webservice.ambiente,
+            dataHoraMysql(), destinatarioDocumento, dest?.nome || null, gerada.totais.vNF,
+            JSON.stringify(documento), xml,
+            documentoId, empresaId, ...SITUACOES_EDITAVEIS,
+          ],
+        );
+        if (!resultado.affectedRows) {
+          throw new Error('A nota mudou de situação enquanto era editada. Recarregue a lista e confira.');
+        }
+      } else {
+        const [inserido] = await pool.query<any>(
+          `INSERT INTO nfe_documentos
+             (empresa_id, chave, modelo, serie, numero, situacao, ambiente, data_emissao,
+              destinatario_documento, destinatario_nome, valor_total, dados, xml)
+           VALUES (?, ?, ?, ?, ?, 'assinada', ?, ?, ?, ?, ?, CAST(? AS JSON), ?)`,
+          [
+            empresaId, gerada.chave, gerada.modelo, gerada.serie, gerada.numero,
+            ctx.config.webservice.ambiente, dataHoraMysql(),
+            destinatarioDocumento, dest?.nome || null, gerada.totais.vNF,
+            JSON.stringify(documento), xml,
+          ],
+        );
+        gravado = inserido.insertId;
       }
-    } else {
-      await pool.query(
-        `INSERT INTO nfe_documentos
-           (empresa_id, chave, modelo, serie, numero, situacao, ambiente, data_emissao,
-            destinatario_documento, destinatario_nome, valor_total, dados, xml)
-         VALUES (?, ?, ?, ?, ?, 'assinada', ?, ?, ?, ?, ?, CAST(? AS JSON), ?)
-         ON DUPLICATE KEY UPDATE
-           situacao = 'assinada', valor_total = VALUES(valor_total),
-           dados = VALUES(dados), xml = VALUES(xml)`,
-        [
-          empresaId, gerada.chave, gerada.modelo, gerada.serie, gerada.numero,
-          ctx.config.webservice.ambiente, dataHoraMysql(),
-          destinatarioDocumento, dest?.nome || null, gerada.totais.vNF,
-          JSON.stringify(documento), xml,
-        ],
-      );
+    } catch (err: any) {
+      // Número único por série (doc/plano-concentrador.md): o banco recusa a segunda nota
+      if (err?.code === 'ER_DUP_ENTRY') {
+        throw new Error(
+          `O número ${gerada.numero} da série ${gerada.serie} já está em uso por outra nota. ` +
+            'Use o próximo número ou edite a nota que já existe.',
+        );
+      }
+      throw err;
     }
 
-    res.json({ success: true, chave: gerada.chave, totais: gerada.totais, xml });
+    // documentoId: a tela manda de volta no próximo "Gerar", que regrava esta nota em vez de criar outra
+    res.json({ success: true, chave: gerada.chave, totais: gerada.totais, xml, documentoId: gravado });
   }));
 
   /** Transmite para a SEFAZ um XML já assinado (o gerado aqui ou um importado) */
@@ -360,6 +372,26 @@ export function criarRotasNFe(): Router {
     const chave = (xml.match(/Id="NFe(\d{44})"/) || [])[1];
     if (!chave) throw new Error('O arquivo não contém uma NF-e com chave de acesso.');
 
+    const modelo = chave.slice(20, 22);
+    const serie = Number(chave.slice(22, 25));
+    const numero = Number(chave.slice(25, 34));
+    const ambiente = Number(valorTag(xml, 'tpAmb') || 2);
+
+    // Com o número único por série, o ON DUPLICATE abaixo poderia cair numa nota de
+    // outra chave e sobrescrevê-la: esse caso é barrado antes
+    const [outra] = await pool.query<any[]>(
+      `SELECT chave FROM nfe_documentos
+        WHERE empresa_id = ? AND modelo = ? AND serie = ? AND ambiente = ? AND numero = ?
+          AND (chave IS NULL OR chave <> ?) LIMIT 1`,
+      [empresaId, modelo, serie, ambiente, numero, chave],
+    );
+    if (outra.length) {
+      throw new Error(
+        `O número ${numero} da série ${serie} já está em uso por outra nota` +
+          (outra[0].chave ? ` (chave ${outra[0].chave}).` : '.'),
+      );
+    }
+
     const protNFe = recortarElemento(xml, 'protNFe');
     await pool.query(
       `INSERT INTO nfe_documentos
@@ -368,8 +400,8 @@ export function criarRotasNFe(): Router {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE xml = VALUES(xml), xml_protocolo = VALUES(xml_protocolo)`,
       [
-        empresaId, chave, chave.slice(20, 22), Number(chave.slice(22, 25)), Number(chave.slice(25, 34)),
-        protNFe ? 'autorizada' : 'assinada', Number(valorTag(xml, 'tpAmb') || 2),
+        empresaId, chave, modelo, serie, numero,
+        protNFe ? 'autorizada' : 'assinada', ambiente,
         dataHoraMysql(), valorTag(recortarElemento(xml, 'dest') || '', 'xNome'),
         Number(valorTag(xml, 'vNF') || 0), xml, protNFe,
       ],
@@ -629,16 +661,15 @@ export function criarRotasNFe(): Router {
     direcaoPadrao: 'desc',
   }));
 
-  /** Sugestão para a Nova NF-e: o maior número já usado na série (mesmo modelo e ambiente) + 1 */
+  /** Sugestão para a Nova NF-e: o próximo do contador da série, sem reservar */
   r.get('/proximo-numero', rota(async (req, res) => {
     const empresaId = empresaDaRequisicao(req);
     const config = await lerConfig(empresaId);
-    const [linhas] = await pool.query<any[]>(
-      `SELECT COALESCE(MAX(numero), 0) + 1 AS proximo FROM nfe_documentos
-        WHERE empresa_id = ? AND modelo = ? AND serie = ? AND ambiente = ?`,
-      [empresaId, config.geral.modeloDF, Number(req.query.serie) || 1, config.webservice.ambiente],
-    );
-    res.json({ numero: Number(linhas[0].proximo) });
+    const numero = await proximoNumero({
+      empresaId, modelo: config.geral.modeloDF, serie: Number(req.query.serie) || 1,
+      ambiente: config.webservice.ambiente,
+    });
+    res.json({ numero });
   }));
 
   r.get('/documentos/:chave', rota(async (req, res) => {

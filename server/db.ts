@@ -43,6 +43,7 @@ export const DB_TABLES = [
   'nfe_inutilizacoes',
   'nfe_distribuicao',
   'nfe_log',
+  'nfe_numeracao',
 ];
 
 export async function checkDbHealth() {
