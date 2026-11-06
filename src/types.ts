@@ -110,9 +110,14 @@ export interface TipoEvento {
   descEvento: string;
   grupo: 'comuns' | 'manifestacao' | 'reforma';
   orgaoNacional?: boolean;
+  orgaoSVRS?: boolean;
   exigeJustificativa?: boolean;
   exigeProtocolo?: boolean;
   exigeCorrecao?: boolean;
+  exigeDataPrevisao?: boolean;
+  exigeItemNaoFornecido?: boolean;
+  exigeVinculoPagamento?: boolean;
+  cancelaEvento?: boolean;
 }
 
 export interface Meta {

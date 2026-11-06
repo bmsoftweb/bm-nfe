@@ -116,6 +116,14 @@ export const validarXml = (dados: { chave?: string; xml?: string }) =>
 export const enviarEvento = (dados: {
   chave: string; tipoEvento: string; sequencia?: number;
   justificativa?: string; protocolo?: string; correcao?: string;
+  /** 112150: nova data de previsão de entrega (aaaa-mm-dd) */
+  dataPrevisaoEntrega?: string;
+  /** 112140: item da nota de pagamento antecipado que não foi fornecido */
+  itensNaoFornecidos?: { item: number; valorIBS: number; valorCBS: number; quantidade: number; unidade: string }[];
+  /** 110300: transação financeira a vincular */
+  vinculoPagamento?: { idTransacao: string; meioPagamento: string; cnpjRecebedor: string; cnpjBasePSP: string };
+  /** 110001: código do evento a cancelar (o protocolo dele vai em `protocolo`) */
+  eventoCancelado?: string;
 }) => post<Retorno>('/evento', dados);
 
 export const inutilizar = (dados: {

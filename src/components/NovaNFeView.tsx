@@ -135,6 +135,9 @@ export const NovaNFeView: React.FC<{
   const [serie, setSerie] = useState(inicial.serie);
   // Na edição, número e data são os da própria nota; na cópia e na nota nova, recomeçam
   const [numero, setNumero] = useState(() => (edicao ? String(edicao.dados?.ide?.numero ?? edicao.numero) : ''));
+  const [dataPrevisaoEntrega, setDataPrevisaoEntrega] = useState<string>(
+    () => edicao?.dados?.ide?.dataPrevisaoEntrega || '',
+  );
   const [dataEmissao, setDataEmissao] = useState(() => {
     const original = edicao?.dados?.ide?.dataEmissao;
     return typeof original === 'string' && /^\d{4}-\d{2}-\d{2}/.test(original) ? original.slice(0, 10) : hoje();
@@ -204,6 +207,7 @@ export const NovaNFeView: React.FC<{
       serie: Number(serie),
       numero: Number(numero),
       dataEmissao,
+      dataPrevisaoEntrega: dataPrevisaoEntrega || undefined,
       tipoDocumento: Number(tipoDocumento),
       finalidade: Number(finalidade),
       consumidorFinal: consumidorFinalEfetivo ? 1 : 0,
@@ -329,6 +333,9 @@ export const NovaNFeView: React.FC<{
           />
           <Campo rotulo="Data de emissão" className="lg:col-span-2">
             <DateField value={dataEmissao} onChange={setDataEmissao} required />
+          </Campo>
+          <Campo rotulo="Previsão de entrega" className="lg:col-span-2">
+            <DateField value={dataPrevisaoEntrega} onChange={setDataPrevisaoEntrega} />
           </Campo>
           <Selecao
             rotulo="Tipo"

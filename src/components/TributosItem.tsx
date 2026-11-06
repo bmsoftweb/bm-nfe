@@ -79,6 +79,13 @@ const UFS_OU_VAZIO = [{ valor: '', rotulo: '' }, ...UFS];
 /** Monofasia de combustíveis no ICMS */
 const monofasico = icmsEm('02', '15', '53', '61');
 const ibscbsMono = (c: Contexto) => c.t['ibscbs.cst'] === '620';
+/** CST do IBS/CBS que têm o grupo de valores por esfera (gIBSCBS) */
+const ibscbsComValores = (c: Contexto) =>
+  !!c.t['ibscbs.cst'] &&
+  !IBSCBS_SEM_VALORES.includes(c.t['ibscbs.cst']) &&
+  !['620', '800', '810'].includes(c.t['ibscbs.cst']);
+const temIBSCBS = (c: Contexto) => !!c.t['ibscbs.cst'];
+const temIS = (c: Contexto) => !!c.t['seletivo.cst'];
 const importacao = (c: Contexto) => !servico(c) && c.cfop.startsWith('3');
 const porContaDeTerceiro = (c: Contexto) => ['2', '3'].includes(c.t['item:di.intermedio']);
 
@@ -238,17 +245,29 @@ export const GRUPOS: Grupo[] = [
     titulo: 'IBS / CBS (reforma tributária)',
     campos: [
       { k: 'ibscbs.cst', rotulo: 'CST IBS/CBS (vazio = sem)', tipo: 'digitos', max: 3 },
-      { k: 'ibscbs.classificacao', rotulo: 'cClassTrib', tipo: 'digitos', max: 6, se: (c) => !!c.t['ibscbs.cst'] },
+      { k: 'ibscbs.classificacao', rotulo: 'cClassTrib', tipo: 'digitos', max: 6, se: temIBSCBS },
+      { k: 'ibscbs.indDoacao', rotulo: 'Doação', tipo: 'sim', se: temIBSCBS },
       ...([
         ['ibscbs.aliquotaIBSUF', 'IBS UF %'],
         ['ibscbs.aliquotaIBSMun', 'IBS Município %'],
         ['ibscbs.aliquotaCBS', 'CBS %'],
         ['ibscbs.reducao', 'Redução alíq. %'],
         ['ibscbs.diferimento', 'Diferimento %'],
+        ['ibscbs.devolucaoIBSUF', 'Devolução IBS UF %'],
+        ['ibscbs.devolucaoIBSMun', 'Devolução IBS Mun. %'],
+        ['ibscbs.devolucaoCBS', 'Devolução CBS %'],
       ] as [string, string][]).map(([k, rotulo]): CampoTributo => ({
-        k, rotulo, tipo: 'pct',
-        se: (c) => !!c.t['ibscbs.cst'] && !IBSCBS_SEM_VALORES.includes(c.t['ibscbs.cst']) && !ibscbsMono(c),
+        k, rotulo, tipo: 'pct', se: ibscbsComValores,
       })),
+
+      // CST 800: transferência de crédito; CST 810: ajuste de competência
+      { k: 'ibscbs.transferencia.ibs', rotulo: 'IBS a transferir', tipo: 'valor', se: (c) => c.t['ibscbs.cst'] === '800' },
+      { k: 'ibscbs.transferencia.cbs', rotulo: 'CBS a transferir', tipo: 'valor', se: (c) => c.t['ibscbs.cst'] === '800' },
+      { k: 'ibscbs.ajuste.competencia', rotulo: 'Competência (AAAA-MM)', tipo: 'texto', max: 7, se: (c) => c.t['ibscbs.cst'] === '810' },
+      { k: 'ibscbs.ajuste.ibs', rotulo: 'IBS do ajuste', tipo: 'valor', se: (c) => c.t['ibscbs.cst'] === '810' },
+      { k: 'ibscbs.ajuste.cbs', rotulo: 'CBS do ajuste', tipo: 'valor', se: (c) => c.t['ibscbs.cst'] === '810' },
+
+      // Monofasia (CST 620): ad rem por padrão; alíquota ad valorem muda o ramo
       ...([
         ['ibscbs.monofasia.adRemIBS', 'Ad rem IBS (R$/un)', 'pct'],
         ['ibscbs.monofasia.adRemCBS', 'Ad rem CBS (R$/un)', 'pct'],
@@ -256,7 +275,52 @@ export const GRUPOS: Grupo[] = [
         ['ibscbs.monofasia.adRemCBSReten', 'Ad rem CBS retenção', 'pct'],
         ['ibscbs.monofasia.valorIBSRetido', 'IBS retido antes', 'valor'],
         ['ibscbs.monofasia.valorCBSRetido', 'CBS retido antes', 'valor'],
+        ['ibscbs.monofasia.baseAdValorem', 'BC ad valorem (R$)', 'valor'],
+        ['ibscbs.monofasia.aliquotaAdValoremIBSUF', 'Ad valorem IBS UF %', 'pct'],
+        ['ibscbs.monofasia.aliquotaAdValoremIBSMun', 'Ad valorem IBS Mun. %', 'pct'],
+        ['ibscbs.monofasia.aliquotaAdValoremCBS', 'Ad valorem CBS %', 'pct'],
+        ['ibscbs.monofasia.quantidadeBio', 'Qtde. biocombustível', 'pct'],
+        ['ibscbs.monofasia.valorIBSDiferenca', 'Diferença IBS (bio)', 'valor'],
+        ['ibscbs.monofasia.valorCBSDiferenca', 'Diferença CBS (bio)', 'valor'],
       ] as [string, string, 'pct' | 'valor'][]).map(([k, rotulo, tipo]): CampoTributo => ({ k, rotulo, tipo, se: ibscbsMono })),
+
+      // Tributação regular: o que seria devido sem o tratamento diferenciado
+      { k: 'ibscbs.tribRegular.cst', rotulo: 'CST trib. regular (vazio = sem)', tipo: 'digitos', max: 3, se: ibscbsComValores },
+      ...([
+        ['ibscbs.tribRegular.classificacao', 'cClassTrib regular', 'digitos'],
+        ['ibscbs.tribRegular.aliquotaIBSUF', 'IBS UF regular %', 'pct'],
+        ['ibscbs.tribRegular.aliquotaIBSMun', 'IBS Mun. regular %', 'pct'],
+        ['ibscbs.tribRegular.aliquotaCBS', 'CBS regular %', 'pct'],
+      ] as [string, string, 'digitos' | 'pct'][]).map(([k, rotulo, tipo]): CampoTributo => ({
+        k, rotulo, tipo, max: tipo === 'digitos' ? 6 : undefined,
+        se: (c) => ibscbsComValores(c) && !!c.t['ibscbs.tribRegular.cst'],
+      })),
+
+      // Crédito presumido da operação (tabela cCredPres do Anexo IV da NT)
+      { k: 'ibscbs.credPres.codigo', rotulo: 'cCredPres (vazio = sem)', tipo: 'digitos', max: 2, se: temIBSCBS },
+      ...([
+        ['ibscbs.credPres.aliquotaIBS', 'Créd. presumido IBS %', 'pct'],
+        ['ibscbs.credPres.aliquotaCBS', 'Créd. presumido CBS %', 'pct'],
+      ] as [string, string, 'pct'][]).map(([k, rotulo, tipo]): CampoTributo => ({
+        k, rotulo, tipo, se: (c) => temIBSCBS(c) && !!c.t['ibscbs.credPres.codigo'],
+      })),
+      { k: 'ibscbs.credPres.suspensivo', rotulo: 'Condição suspensiva', tipo: 'sim',
+        se: (c) => temIBSCBS(c) && !!c.t['ibscbs.credPres.codigo'] },
+
+      // Estorno de crédito
+      { k: 'ibscbs.estornoIBS', rotulo: 'Estorno de crédito IBS', tipo: 'valor', se: temIBSCBS },
+      { k: 'ibscbs.estornoCBS', rotulo: 'Estorno de crédito CBS', tipo: 'valor', se: temIBSCBS },
+    ],
+  },
+  {
+    titulo: 'Imposto Seletivo',
+    campos: [
+      { k: 'seletivo.cst', rotulo: 'CST IS (vazio = sem)', tipo: 'digitos', max: 3 },
+      { k: 'seletivo.classificacao', rotulo: 'cClassTribIS', tipo: 'digitos', max: 6, se: temIS },
+      { k: 'seletivo.aliquota', rotulo: 'Alíq. IS %', tipo: 'pct', se: temIS },
+      { k: 'seletivo.adRem', rotulo: 'Ad rem IS (R$/un)', tipo: 'pct', se: temIS },
+      { k: 'seletivo.unidadeTributavel', rotulo: 'Unidade tributável', tipo: 'texto', max: 6, se: temIS },
+      { k: 'seletivo.quantidadeTributavel', rotulo: 'Qtde. tributável', tipo: 'pct', se: temIS },
     ],
   },
   {

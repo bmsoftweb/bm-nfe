@@ -270,18 +270,20 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
     y += 2 * MM;
   }
 
-  // ---- IBS / CBS (reforma tributária) ----
+  // ---- IBS / CBS / IS (reforma tributária) ----
   const ibscbs = inf.total?.IBSCBSTot;
-  if (ibscbs) {
-    pdf.fontSize(6).font('Helvetica-Bold').fillColor('#000').text('IBS / CBS — REFORMA TRIBUTÁRIA', esq, y + 1);
+  const seletivo = inf.total?.ISTot;
+  if (ibscbs || seletivo) {
+    pdf.fontSize(6).font('Helvetica-Bold').fillColor('#000').text('IBS / CBS / IS — REFORMA TRIBUTÁRIA', esq, y + 1);
     y += 5 * MM;
-    const ibs = ibscbs.gIBS || {};
+    const ibs = ibscbs?.gIBS || {};
     linhaDeCampos([
-      ['Base de Cálculo IBS/CBS', moeda(ibscbs.vBCIBSCBS)],
+      ['Base de Cálculo IBS/CBS', moeda(ibscbs?.vBCIBSCBS)],
       ['Valor do IBS UF', moeda(ibs.gIBSUF?.vIBSUF)],
       ['Valor do IBS Município', moeda(ibs.gIBSMun?.vIBSMun)],
       ['Valor Total do IBS', moeda(ibs.vIBS)],
-      ['Valor da CBS', moeda(ibscbs.gCBS?.vCBS)],
+      ['Valor da CBS', moeda(ibscbs?.gCBS?.vCBS)],
+      ['Valor do Imposto Seletivo', moeda(seletivo?.vIS)],
     ]);
     y += 2 * MM;
   }

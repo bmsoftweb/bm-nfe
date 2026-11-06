@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Send } from 'lucide-react';
 import * as api from '../services/api';
 import { Meta } from '../types';
-import { Area, Botao, Confirmacao, Secao, Selecao, Texto, Vazio } from './ui';
+import { Area, Botao, Campo, Confirmacao, Secao, Selecao, Texto, Vazio } from './ui';
+import { DateField } from './DateField';
+import { NumberField } from './NumberField';
 import { PainelRespostas, useOperacao } from './PainelRespostas';
 import { formatarChave, formatarDataHora } from '../utils/formatters';
 
@@ -20,6 +22,21 @@ export const EventosView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
   const [protocolo, setProtocolo] = useState('');
   const [justificativa, setJustificativa] = useState('');
   const [correcao, setCorrecao] = useState('');
+  // 112150 — Atualização da Data de Previsão de Entrega
+  const [dataPrevisao, setDataPrevisao] = useState('');
+  // 112140 — Fornecimento não realizado com pagamento antecipado (um item por envio)
+  const [itemNF, setItemNF] = useState('1');
+  const [valorIBSNF, setValorIBSNF] = useState('0.00');
+  const [valorCBSNF, setValorCBSNF] = useState('0.00');
+  const [qtdeNF, setQtdeNF] = useState('0.0000');
+  const [unidadeNF, setUnidadeNF] = useState('UN');
+  // 110300 — Vinculação da transação de pagamento (NT 2026.006)
+  const [idTransacao, setIdTransacao] = useState('');
+  const [meioPgto, setMeioPgto] = useState('');
+  const [cnpjReceb, setCnpjReceb] = useState('');
+  const [cnpjBasePSP, setCnpjBasePSP] = useState('');
+  // 110001 — Cancelamento de evento: o protocolo do evento cancelado vai em `protocolo`
+  const [eventoCancelado, setEventoCancelado] = useState('110300');
   const [confirmando, setConfirmando] = useState(false);
   const [historico, setHistorico] = useState<any[]>([]);
 
@@ -33,14 +50,34 @@ export const EventosView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
 
   const podeEnviar =
     chave.length === 44 &&
-    (!tipo?.exigeProtocolo || protocolo.length > 0) &&
+    (!(tipo?.exigeProtocolo || tipo?.cancelaEvento) || protocolo.length === 15) &&
+    (!tipo?.exigeVinculoPagamento ||
+      (idTransacao.trim().length >= 2 && meioPgto.length > 0 && cnpjReceb.length === 14 && cnpjBasePSP.length === 8)) &&
     (!tipo?.exigeJustificativa || justificativa.trim().length >= 15) &&
-    (!tipo?.exigeCorrecao || correcao.trim().length >= 15);
+    (!tipo?.exigeCorrecao || correcao.trim().length >= 15) &&
+    (!tipo?.exigeDataPrevisao || !!dataPrevisao) &&
+    (!tipo?.exigeItemNaoFornecido || (Number(qtdeNF) > 0 && unidadeNF.trim().length > 0));
 
   const enviar = async () => {
     setConfirmando(false);
     await executar(() =>
-      api.enviarEvento({ chave, tipoEvento, sequencia, protocolo, justificativa, correcao }),
+      api.enviarEvento({
+        chave, tipoEvento, sequencia, protocolo, justificativa, correcao,
+        dataPrevisaoEntrega: tipo?.exigeDataPrevisao ? dataPrevisao : undefined,
+        itensNaoFornecidos: tipo?.exigeItemNaoFornecido
+          ? [{
+              item: Number(itemNF) || 1,
+              valorIBS: Number(valorIBSNF) || 0,
+              valorCBS: Number(valorCBSNF) || 0,
+              quantidade: Number(qtdeNF) || 0,
+              unidade: unidadeNF.trim(),
+            }]
+          : undefined,
+        vinculoPagamento: tipo?.exigeVinculoPagamento
+          ? { idTransacao: idTransacao.trim(), meioPagamento: meioPgto, cnpjRecebedor: cnpjReceb, cnpjBasePSP }
+          : undefined,
+        eventoCancelado: tipo?.cancelaEvento ? eventoCancelado : undefined,
+      }),
     );
     carregarHistorico();
   };
@@ -80,15 +117,65 @@ export const EventosView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
             className="lg:col-span-2"
           />
 
-          {tipo?.exigeProtocolo && (
+          {tipo?.cancelaEvento && (
+            <Selecao
+              rotulo="Evento a cancelar"
+              value={eventoCancelado}
+              onChange={(e) => setEventoCancelado(e.target.value)}
+              opcoes={(meta?.tiposEvento || [])
+                .filter((t) => ['110300', '112140', '112150'].includes(t.codigo))
+                .map((t) => ({ valor: t.codigo, rotulo: `${t.codigo} — ${t.descricao}` }))}
+              className="lg:col-span-6"
+            />
+          )}
+
+          {(tipo?.exigeProtocolo || tipo?.cancelaEvento) && (
             <Texto
-              rotulo="Protocolo de autorização"
+              rotulo={tipo?.cancelaEvento ? 'Protocolo do evento a cancelar' : 'Protocolo de autorização'}
               required
               inputMode="numeric"
               value={protocolo}
               onChange={(e) => setProtocolo(e.target.value.replace(/\D/g, '').slice(0, 15))}
               className="lg:col-span-4"
             />
+          )}
+
+          {tipo?.exigeVinculoPagamento && (
+            <>
+              <Texto
+                rotulo="Identificador da transação"
+                required
+                maxLength={35}
+                value={idTransacao}
+                onChange={(e) => setIdTransacao(e.target.value)}
+                dica="Como consta na transação: Pix (txid), boleto etc."
+                className="lg:col-span-4"
+              />
+              <Texto
+                rotulo="Meio de pagamento"
+                required
+                inputMode="numeric"
+                value={meioPgto}
+                onChange={(e) => setMeioPgto(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                dica="Código da Tabela Nacional de Meios de Pagamento (IT 2026.001)"
+                className="lg:col-span-2"
+              />
+              <Texto
+                rotulo="CNPJ do recebedor"
+                required
+                value={cnpjReceb}
+                onChange={(e) => setCnpjReceb(e.target.value.replace(/[^0-9A-Za-z]/g, '').toUpperCase().slice(0, 14))}
+                className="lg:col-span-3"
+              />
+              <Texto
+                rotulo="CNPJ base da instituição de pagamento"
+                required
+                value={cnpjBasePSP}
+                onChange={(e) => setCnpjBasePSP(e.target.value.replace(/[^0-9A-Za-z]/g, '').toUpperCase().slice(0, 8))}
+                dica="8 primeiras posições do CNPJ do banco ou PSP"
+                className="lg:col-span-3"
+              />
+            </>
           )}
 
           {tipo?.exigeCorrecao && (
@@ -102,6 +189,40 @@ export const EventosView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
               dica={`${correcao.trim().length}/1000 — mínimo de 15 caracteres`}
               className="lg:col-span-12"
             />
+          )}
+
+          {tipo?.exigeDataPrevisao && (
+            <Campo rotulo="Nova data de previsão de entrega" className="lg:col-span-3">
+              <DateField value={dataPrevisao} onChange={setDataPrevisao} required />
+            </Campo>
+          )}
+
+          {tipo?.exigeItemNaoFornecido && (
+            <>
+              <Texto
+                rotulo="Nº do item na nota"
+                inputMode="numeric"
+                value={itemNF}
+                onChange={(e) => setItemNF(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                className="lg:col-span-2"
+              />
+              <Campo rotulo="IBS não fornecido (R$)" className="lg:col-span-2">
+                <NumberField value={valorIBSNF} onChange={setValorIBSNF} scale={2} />
+              </Campo>
+              <Campo rotulo="CBS não fornecida (R$)" className="lg:col-span-2">
+                <NumberField value={valorCBSNF} onChange={setValorCBSNF} scale={2} />
+              </Campo>
+              <Campo rotulo="Quantidade não fornecida" className="lg:col-span-2">
+                <NumberField value={qtdeNF} onChange={setQtdeNF} scale={4} />
+              </Campo>
+              <Texto
+                rotulo="Unidade"
+                value={unidadeNF}
+                maxLength={6}
+                onChange={(e) => setUnidadeNF(e.target.value.toUpperCase())}
+                className="lg:col-span-2"
+              />
+            </>
           )}
 
           {tipo?.exigeJustificativa && !tipo?.exigeCorrecao && (

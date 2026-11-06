@@ -467,6 +467,7 @@ export const ConfiguracoesView: React.FC<{
               inputMode="numeric"
               value={emitente.inscricao_estadual || ''}
               onChange={(e) => alterarEmitente('inscricao_estadual', e.target.value)}
+              dica="ISENTO para IE isenta. Vazio = contribuinte só de IBS/CBS: NF-e na SVRS, sem ICMS (NT 2026.007)"
               className="lg:col-span-3"
             />
             <Selecao

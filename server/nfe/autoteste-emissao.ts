@@ -17,7 +17,7 @@ import { gerarDanfe } from './danfe.js';
 import { CONFIG_PADRAO } from '../config.js';
 import { chaveValida } from './chave.js';
 import { semDeclaracao } from './xml.js';
-import { montarEvento, montarInutilizacao, PedidoEvento } from './operacoes.js';
+import { montarEvento, montarInutilizacao, PedidoEvento, ufDaNota } from './operacoes.js';
 import {
   FalhaSchema, ResultadoValidacao, exigirValido, validarEvento, validarInutilizacao, validarNFe, validarQualquer,
 } from './validacao.js';
@@ -394,6 +394,153 @@ async function principal() {
     assert.strictEqual(t.vNF, 2400);
   });
 
+  // --- Reforma tributária: grupos da NT 2025.002 ------------------------------
+
+  await conferir('imposto seletivo: IS no item e ISTot no total, no XSD', async () => {
+    const nota = await validarAssinando(ctx, {
+      ...documento,
+      itens: [item({ cst: '00', aliquota: 18, ibscbs,
+        seletivo: { cst: '000', classificacao: '000001', aliquota: 10, adRem: 0.5 } })],
+    });
+    // vIS = 100 × 10% + 1 un × 0,50 (RV UB11-10 da NT 2025.002)
+    assert.strictEqual(nota.totais.vIS, 10.5);
+    assert.ok(nota.xml.includes('<CSTIS>000</CSTIS>'), 'faltou o CSTIS');
+    assert.ok(nota.xml.includes('<ISTot><vIS>10.50</vIS></ISTot>'), 'faltou o ISTot');
+  });
+
+  await conferir('crédito presumido, estorno, devolução e tributação regular no XSD', async () => {
+    const nota = await validarAssinando(ctx, {
+      ...documento,
+      itens: [
+        item({ cst: '00', aliquota: 18, ibscbs: {
+          ...ibscbs,
+          devolucaoIBSUF: 50,
+          tribRegular: { cst: '000', classificacao: '000001', aliquotaIBSUF: 0.1, aliquotaIBSMun: 0, aliquotaCBS: 0.9 },
+          credPres: { codigo: '1', aliquotaIBS: 5, aliquotaCBS: 5 },
+          estornoIBS: 0.05, estornoCBS: 0.45,
+        } }),
+        item({ cst: '00', aliquota: 18, ibscbs: {
+          ...ibscbs,
+          credPres: { codigo: '2', aliquotaIBS: 3, suspensivo: true },
+        } }),
+      ],
+    });
+    const t = nota.totais;
+    assert.ok(nota.xml.includes('<gCredPresOper>'), 'faltou o gCredPresOper');
+    assert.ok(nota.xml.includes('<gTribRegular>'), 'faltou o gTribRegular');
+    assert.ok(nota.xml.includes('<gDevTrib>'), 'faltou o gDevTrib');
+    // A base, quando não informada, é a mesma do IBS/CBS: a operação sem os
+    // tributos que coexistem (100 − 18 de ICMS = 82)
+    assert.strictEqual(t.vCredPresIBS, 4.1);        // 5% de 82, sem condição suspensiva
+    assert.strictEqual(t.vCredPresCondSusIBS, 2.46); // 3% de 82, com condição suspensiva
+    assert.strictEqual(t.vCredPresCBS, 4.1);
+    assert.strictEqual(t.vIBSEstCred, 0.05);
+    assert.strictEqual(t.vCBSEstCred, 0.45);
+    // Devolução de 50% sobre o IBS UF do item (0,10% de 82 = 0,08 → 0,04)
+    assert.strictEqual(t.vDevTribIBSUF, 0.04);
+    assert.ok(nota.xml.includes('<gEstornoCred><vIBSEstCred>0.05</vIBSEstCred>'), 'faltou o estorno no total');
+  });
+
+  await conferir('CST 800 leva gTransfCred e sem os valores é barrado', async () => {
+    await validarAssinando(ctx, {
+      ...documento,
+      itens: [item({ cst: '41', ibscbs: { cst: '800', classificacao: '800001', transferencia: { ibs: 10, cbs: 90 } } })],
+    });
+    assert.throws(
+      () => gerarNFe(ctx, {
+        ...documento,
+        itens: [item({ cst: '41', ibscbs: { cst: '800', classificacao: '800001' } })],
+      } as any),
+      /CST 800/,
+    );
+  });
+
+  await conferir('CST 810 leva gAjusteCompet e valida a competência', async () => {
+    await validarAssinando(ctx, {
+      ...documento,
+      itens: [item({ cst: '41', ibscbs: { cst: '810', classificacao: '810001', ajuste: { competencia: '2026-10', ibs: 1, cbs: 9 } } })],
+    });
+    assert.throws(
+      () => gerarNFe(ctx, {
+        ...documento,
+        itens: [item({ cst: '41', ibscbs: { cst: '810', classificacao: '810001', ajuste: { competencia: '10/2026', ibs: 1, cbs: 9 } } })],
+      } as any),
+      /AAAA-MM/,
+    );
+  });
+
+  await conferir('monofasia ad valorem e diferença de biocombustível no XSD', async () => {
+    const nota = await validarAssinando(ctx, {
+      ...documento,
+      itens: [item(
+        { cst: '02', adRemICMS: 1.2, ibscbs: { cst: '620', classificacao: '620001', monofasia: {
+          baseAdValorem: 100, aliquotaAdValoremIBSUF: 0.05, aliquotaAdValoremIBSMun: 0.05, aliquotaAdValoremCBS: 0.9,
+          quantidadeBio: 27, valorIBSDiferenca: 0.02, valorCBSDiferenca: 0.18,
+        } } },
+        { combustivel: { codigoANP: '320102001', descricaoANP: 'GASOLINA C COMUM' } },
+      )],
+    });
+    assert.ok(nota.xml.includes('<gIBSMonoAdValorem>'), 'faltou o ramo ad valorem do IBS');
+    assert.ok(nota.xml.includes('<gCBSMonoAdValorem>'), 'faltou o ramo ad valorem da CBS');
+    assert.ok(nota.xml.includes('<gpBioDiferenca>'), 'faltou o gpBioDiferenca');
+    assert.strictEqual(nota.totais.vIBSMono, 0.1); // 0,05% UF + 0,05% Mun sobre 100
+    assert.strictEqual(nota.totais.vCBSMono, 0.9);
+  });
+
+  await conferir('doação e previsão de entrega no XSD', async () => {
+    const nota = await validarAssinando(ctx, {
+      ...documento,
+      ide: { ...documento.ide, dataPrevisaoEntrega: '2026-12-15' },
+      itens: [item({ cst: '00', aliquota: 18, ibscbs: { ...ibscbs, indDoacao: true } })],
+    });
+    assert.ok(nota.xml.includes('<dPrevEntrega>2026-12-15</dPrevEntrega>'), 'faltou o dPrevEntrega');
+    assert.ok(nota.xml.includes('<indDoacao>1</indDoacao>'), 'faltou o indDoacao');
+  });
+
+  await conferir('vinculação da transação de pagamento (gPgtoVinc) no XSD', async () => {
+    const nota = await validarAssinando(ctx, {
+      ...documento,
+      itens: [item({ cst: '00', aliquota: 18, ibscbs })],
+      pagamentos: [{ forma: '03' }],
+      vinculosPagamento: [{
+        numero: 1, idTransacao: 'ABC-123456', meioPagamento: '3',
+        cnpjRecebedor: '05321136000117', cnpjBasePSP: '05321136',
+      }],
+    });
+    assert.ok(/<gPgto nPag="1" idTransacao="ABC-123456">/.test(nota.xml), 'faltou o gPgto');
+    assert.ok(nota.xml.includes('<tpMeioPgto>03</tpMeioPgto>'), 'faltou o tpMeioPgto');
+  });
+
+  // --- NT 2026.007: emitente sem IE (contribuinte exclusivo do IBS/CBS) ----------
+
+  const semIE = (modelo: '55' | '65' = '55'): Contexto => {
+    const c = contexto(modelo);
+    return { ...c, emitente: { ...c.emitente, inscricao_estadual: '' } };
+  };
+
+  await conferir('emitente sem IE: NF-e sem a tag IE e sem ICMS, no XSD, autorizada na SVRS', async () => {
+    const c = semIE();
+    const nota = await validarAssinando(c, {
+      ...documento,
+      // O CST do ICMS vindo da tela é ignorado: a RV N01-10 proíbe o grupo
+      itens: [item({ cst: '00', aliquota: 18, ibscbs })],
+    });
+    assert.ok(!/<emit>.*<IE>/.test(nota.xml), 'a IE do emitente não podia ir');
+    assert.ok(!nota.xml.includes('<ICMS>'), 'o ICMS não podia ir');
+    assert.strictEqual(nota.totais.vICMS, 0);
+    assert.strictEqual(ufDaNota(c, nota.chave), 'SVRS');
+    assert.strictEqual(ufDaNota(ctx, nota.chave), 'SP'); // com IE, a nota é da UF
+  });
+
+  await conferir('emitente sem IE: item sem IBS/CBS e NFC-e são barrados; ISENTO continua indo', async () => {
+    assert.throws(() => gerarNFe(semIE(), { ...documento, itens: [item({ cst: '00', aliquota: 18 })] } as any), /rejeição 162/);
+    assert.throws(() => gerarNFe(semIE('65'), documento as any), /NFC-e exige a Inscrição Estadual/);
+    const c = contexto();
+    const isento = gerarNFe({ ...c, emitente: { ...c.emitente, inscricao_estadual: 'ISENTO' } }, documento as any);
+    assert.ok(isento.xml.includes('<IE>ISENTO</IE>'), 'ISENTO sumiu');
+    assert.ok(isento.xml.includes('<ICMS>'), 'com ISENTO o ICMS continua');
+  });
+
   await conferir('NCM inválido é barrado, apontando o campo', async () => {
     const r = await validarNFe(assinado.replace('<NCM>84713012</NCM>', '<NCM>8471301</NCM>'));
     assert.ok(!r.valido, 'NCM com 7 dígitos não podia passar');
@@ -441,6 +588,64 @@ async function principal() {
       assert.ok(r.valido, semErros(r));
     });
   }
+
+  await conferir('evento 112140 fornecimento não realizado passa nos dois schemas', async () => {
+    const m = montarEvento(ctx, {
+      chave: gerada.chave,
+      tipoEvento: '112140',
+      itensNaoFornecidos: [{ item: 1, valorIBS: 0.1, valorCBS: 0.9, quantidade: 2, unidade: 'UN' }],
+    });
+    const r = await validarEvento(m.mensagem, '112140');
+    assert.ok(r.valido, semErros(r));
+    assert.ok(m.mensagem.includes('<gItemNaoFornecido nItem="1">'), 'faltou o gItemNaoFornecido');
+  });
+
+  await conferir('evento 112150 atualização da previsão de entrega passa nos dois schemas', async () => {
+    const m = montarEvento(ctx, {
+      chave: gerada.chave,
+      tipoEvento: '112150',
+      dataPrevisaoEntrega: '2026-12-20',
+    });
+    const r = await validarEvento(m.mensagem, '112150');
+    assert.ok(r.valido, semErros(r));
+    assert.ok(m.mensagem.includes('<dPrevEntrega>2026-12-20</dPrevEntrega>'), 'faltou o dPrevEntrega');
+
+    assert.throws(
+      () => montarEvento(ctx, { chave: gerada.chave, tipoEvento: '112150' }),
+      /previsão de entrega/,
+    );
+  });
+
+  await conferir('evento 110300 vinculação de pagamento passa nos dois schemas', async () => {
+    const m = montarEvento(ctx, {
+      chave: gerada.chave,
+      tipoEvento: '110300',
+      protocolo: '135260000000001',
+      vinculoPagamento: {
+        idTransacao: 'PIX-E2E-0001', meioPagamento: '3',
+        cnpjRecebedor: '05321136000117', cnpjBasePSP: '00000000',
+      },
+    });
+    const r = await validarEvento(m.mensagem, '110300');
+    assert.ok(r.valido, semErros(r));
+    assert.ok(m.mensagem.includes('<gPgto idTransacao="PIX-E2E-0001"><tpMeioPgto>03</tpMeioPgto>'), 'gPgto errado');
+  });
+
+  await conferir('evento 110001 cancela o 110300 e passa nos dois schemas', async () => {
+    const m = montarEvento(ctx, {
+      chave: gerada.chave,
+      tipoEvento: '110001',
+      eventoCancelado: '110300',
+      protocolo: '135260000000002',
+    });
+    const r = await validarEvento(m.mensagem, '110001');
+    assert.ok(r.valido, semErros(r));
+    assert.ok(m.mensagem.includes('<tpEventoAut>110300</tpEventoAut><nProtEvento>135260000000002</nProtEvento>'));
+    assert.throws(
+      () => montarEvento(ctx, { chave: gerada.chave, tipoEvento: '110001', eventoCancelado: '110111', protocolo: '135260000000002' }),
+      /evento a cancelar/,
+    );
+  });
 
   await conferir('protocolo curto no cancelamento é barrado pelo e110111', async () => {
     // nProt tem 15 dígitos no schema específico; o envEvento genérico não sabe disso

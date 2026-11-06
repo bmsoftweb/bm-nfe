@@ -90,14 +90,26 @@ export function createApp() {
       }
 
       const encontrado = usuarios[0];
-      if (!senhaConfere(String(senha || ''), encontrado.senha_hash)) {
+      const informada = String(senha || '');
+      const semSenhaCadastrada = !String(encontrado.senha_hash || '').trim();
+
+      if (semSenhaCadastrada) {
+        // Usuário criado direto no banco, sem senha: a primeira que ele digitar
+        // passa a ser a dele. Em branco não vale, senão o acesso ficaria aberto.
+        if (!informada) {
+          return res.status(401).json({
+            success: false,
+            error: 'Este usuário ainda não tem senha. Digite a senha que passará a valer para ele.',
+          });
+        }
+      } else if (!senhaConfere(informada, encontrado.senha_hash)) {
         return res.status(401).json({ success: false, error: 'Senha incorreta.' });
       }
 
-      // Senha em formato legado é reescrita em bcrypt no primeiro acesso
-      if (!/^\$2[aby]\$/.test(encontrado.senha_hash)) {
+      // Senha ausente ou em formato legado vira bcrypt neste acesso
+      if (semSenhaCadastrada || !/^\$2[aby]\$/.test(encontrado.senha_hash)) {
         await pool.query('UPDATE nfe_usuarios SET senha_hash = ? WHERE id = ?', [
-          bcrypt.hashSync(String(senha), 10),
+          bcrypt.hashSync(informada, 10),
           encontrado.id,
         ]);
       }

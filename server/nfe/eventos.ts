@@ -12,9 +12,19 @@ export interface TipoEvento {
   descEvento: string;
   grupo: 'comuns' | 'manifestacao' | 'reforma';
   orgaoNacional?: boolean;
+  /** Eventos da reforma tributária são recebidos pela SEFAZ Virtual do RS */
+  orgaoSVRS?: boolean;
   exigeJustificativa?: boolean;
   exigeProtocolo?: boolean;
   exigeCorrecao?: boolean;
+  /** 112150: pede a nova data de previsão de entrega */
+  exigeDataPrevisao?: boolean;
+  /** 112140: pede o item não fornecido (valores e quantidade) */
+  exigeItemNaoFornecido?: boolean;
+  /** 110300: pede a transação financeira a vincular (NT 2026.006) */
+  exigeVinculoPagamento?: boolean;
+  /** 110001: cancela outro evento, pelo tipo e protocolo dele */
+  cancelaEvento?: boolean;
 }
 
 export const TIPOS_EVENTO: TipoEvento[] = [
@@ -41,7 +51,7 @@ export const TIPOS_EVENTO: TipoEvento[] = [
     orgaoNacional: true,
   },
   {
-    codigo: '110192',
+    codigo: '110112',
     descricao: 'Cancelamento por Substituição (NFC-e)',
     descEvento: 'Cancelamento por Substituicao',
     grupo: 'comuns',
@@ -101,7 +111,43 @@ export const TIPOS_EVENTO: TipoEvento[] = [
     orgaoNacional: true,
     exigeJustificativa: true,
   },
+  {
+    codigo: '112140',
+    descricao: 'Reforma — Fornecimento não realizado com pagamento antecipado',
+    // Diferente dos eventos antigos, o schema deste exige o texto acentuado
+    descEvento: 'Fornecimento não realizado com pagamento antecipado',
+    grupo: 'reforma',
+    orgaoSVRS: true,
+    exigeItemNaoFornecido: true,
+  },
+  {
+    codigo: '112150',
+    descricao: 'Reforma — Atualização da Data de Previsão de Entrega',
+    descEvento: 'Atualização da Data de Previsão de Entrega',
+    grupo: 'reforma',
+    orgaoSVRS: true,
+    exigeDataPrevisao: true,
+  },
+  {
+    // NT 2026.006 (split payment): liga a nota já autorizada a um Pix, boleto etc.
+    codigo: '110300',
+    descricao: 'Reforma — Vinculação da Transação de Pagamento',
+    descEvento: 'Vinculação Pagamento',
+    grupo: 'reforma',
+    exigeProtocolo: true,
+    exigeVinculoPagamento: true,
+  },
+  {
+    codigo: '110001',
+    descricao: 'Reforma — Cancelamento de Evento',
+    descEvento: 'Cancelamento de Evento',
+    grupo: 'reforma',
+    cancelaEvento: true,
+  },
 ];
+
+/** Eventos do catálogo que o 110001 cancela (o schema aceita outros, que o nfeWeb não emite) */
+export const EVENTOS_CANCELAVEIS = ['110300', '112140', '112150'];
 
 export function acharTipoEvento(codigo: string): TipoEvento {
   const achado = TIPOS_EVENTO.find((t) => t.codigo === codigo);

@@ -27,6 +27,15 @@ export interface Emitente {
   crt: number;
 }
 
+/**
+ * NT 2026.007: emitente sem IE (e sem "ISENTO") é contribuinte exclusivo do IBS/CBS.
+ * A NF-e sai sem a tag IE, sem ICMS, com IBS/CBS em todo item, e é autorizada só na SVRS.
+ */
+export function emitenteSemIE(emit: Emitente): boolean {
+  const ie = (emit.inscricao_estadual || '').trim();
+  return !/ISENTO/i.test(ie) && !/\d/.test(ie);
+}
+
 export interface Contexto {
   empresaId: number;
   config: ConfigNFe;

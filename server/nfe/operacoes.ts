@@ -6,7 +6,7 @@
  * transmite pelo SOAP e devolve um retorno já digerido (cStat, xMotivo, XML).
  */
 import zlib from 'zlib';
-import { Contexto, registrarLog } from './contexto.js';
+import { Contexto, emitenteSemIE, registrarLog } from './contexto.js';
 import { assinar } from './assinatura.js';
 import { enviarSoap } from './soap.js';
 import {
@@ -18,9 +18,9 @@ import {
   VERSAO_LAYOUT,
   ufPorCodigo,
 } from './servicos.js';
-import { DECLARACAO, NS_NFE, lerXml, limparTexto, recortarElemento, semDeclaracao, tag, valorTag } from './xml.js';
+import { DECLARACAO, NS_NFE, escapar, grupoObrigatorio, lerXml, limparTexto, num, recortarElemento, semDeclaracao, tag, valorTag } from './xml.js';
 import { dataHoraDFe, agora } from './datas.js';
-import { acharTipoEvento, COND_USO_CCE } from './eventos.js';
+import { acharTipoEvento, COND_USO_CCE, EVENTOS_CANCELAVEIS } from './eventos.js';
 import { chaveValida, lerChave } from './chave.js';
 import { exigirValido, validarEvento, validarInutilizacao, validarNFe } from './validacao.js';
 
@@ -48,8 +48,22 @@ function ufDoServico(ctx: Contexto): string {
     case 7:
       return 'SVC-RS';
     default:
-      return ctx.config.webservice.uf;
+      // NT 2026.007: a NF-e de contribuinte exclusivo do IBS/CBS (sem IE) é autorizada só na SVRS
+      return ctx.modelo === 'NFe' && emitenteSemIE(ctx.emitente) ? 'SVRS' : ctx.config.webservice.uf;
   }
+}
+
+/**
+ * UF que atende uma nota pela chave. Nota do próprio emitente sem IE foi autorizada
+ * na SVRS, e as consultas e os eventos dela vão para lá também (NT 2026.007, RV 1P10-40);
+ * a NF-e avulsa (série 890-919) fica de fora.
+ */
+export function ufDaNota(ctx: Contexto, chave: string): string {
+  const c = lerChave(chave);
+  const propria = c.cnpj === ctx.emitente.cnpj.replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+  const avulsa = c.serie >= 890 && c.serie <= 919;
+  if (c.modelo === '55' && propria && !avulsa && emitenteSemIE(ctx.emitente)) return 'SVRS';
+  return ufPorCodigo(c.cUF);
 }
 
 function proxy(ctx: Contexto) {
@@ -169,7 +183,7 @@ export async function consultarChave(ctx: Contexto, chave: string): Promise<Reto
   const ret = await transmitir(ctx, 'consultarChave', 'NFeConsultaProtocolo', mensagem, {
     chave: limpa,
     // A consulta vai para a UF que emitiu a nota, que pode não ser a configurada
-    uf: ufPorCodigo(lerChave(limpa).cUF) || undefined,
+    uf: ufDaNota(ctx, limpa) || undefined,
   });
 
   ret.dados = {
@@ -304,16 +318,109 @@ export interface PedidoEvento {
   justificativa?: string;
   protocolo?: string;
   correcao?: string;
+  /** 112150: nova data de previsão de entrega (aaaa-mm-dd) */
+  dataPrevisaoEntrega?: string;
+  /** 112140: itens da nota de pagamento antecipado que não foram fornecidos */
+  itensNaoFornecidos?: {
+    item: number;
+    valorIBS: number;
+    valorCBS: number;
+    quantidade: number;
+    unidade: string;
+  }[];
+  /** 110300: transação financeira a vincular à nota */
+  vinculoPagamento?: {
+    idTransacao: string;
+    /** Código do meio de pagamento (Informe Técnico 2026.001) */
+    meioPagamento: string;
+    cnpjRecebedor: string;
+    /** CNPJ base (8 posições) da instituição de pagamento do recebedor */
+    cnpjBasePSP: string;
+  };
+  /** 110001: código do evento a cancelar; o protocolo dele vai em `protocolo` */
+  eventoCancelado?: string;
   /** Campos livres de eventos que não têm campo dedicado (ex.: ator interessado) */
   extras?: Record<string, string>;
+}
+
+/** 110001: o evento cancelado, conferido contra os que o nfeWeb emite */
+function eventoACancelar(p: PedidoEvento) {
+  if (!EVENTOS_CANCELAVEIS.includes(String(p.eventoCancelado))) {
+    throw new Error(`Informe o evento a cancelar: ${EVENTOS_CANCELAVEIS.join(', ')}.`);
+  }
+  return acharTipoEvento(String(p.eventoCancelado));
 }
 
 function montarDetEvento(tipo: ReturnType<typeof acharTipoEvento>, p: PedidoEvento): string {
   const partes: string[] = [tag('descEvento', tipo.descEvento)];
 
+  // 110001 tem leiaute próprio: sem tpAutor, com o tipo e o protocolo do evento cancelado
+  if (tipo.cancelaEvento) {
+    const alvo = eventoACancelar(p);
+    if (!/^\d{15}$/.test(p.protocolo || '')) throw new Error('Informe o protocolo (15 dígitos) do evento a cancelar.');
+    partes.push(
+      tag('cOrgaoAutor', lerChave(p.chave).cUF),
+      tag('verAplic', 'nfeWeb'),
+      tag('tpEventoAut', alvo.codigo),
+      tag('nProtEvento', p.protocolo),
+    );
+    return `<detEvento versao="1.00">${partes.join('')}</detEvento>`;
+  }
+
+  // Os eventos da reforma têm um preâmbulo próprio: autor, tipo de autor e aplicativo
+  if (tipo.grupo === 'reforma') {
+    partes.push(
+      tag('cOrgaoAutor', lerChave(p.chave).cUF),
+      tag('tpAutor', 1),
+      tag('verAplic', 'nfeWeb'),
+    );
+  }
+
+  if (tipo.exigeDataPrevisao) {
+    const data = String(p.dataPrevisaoEntrega || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) {
+      throw new Error('Informe a nova data de previsão de entrega.');
+    }
+    partes.push(tag('dPrevEntrega', data));
+  }
+
+  if (tipo.exigeItemNaoFornecido) {
+    const itens = p.itensNaoFornecidos || [];
+    if (!itens.length) {
+      throw new Error('Informe ao menos um item da nota de pagamento antecipado que não foi fornecido.');
+    }
+    for (const i of itens) {
+      if (!i.unidade?.trim()) throw new Error('Informe a unidade da quantidade não fornecida.');
+      partes.push(
+        `<gItemNaoFornecido nItem="${Number(i.item) || 1}">` +
+          tag('vIBS', num(i.valorIBS)) +
+          tag('vCBS', num(i.valorCBS)) +
+          grupoObrigatorio('gControleEstoque',
+            tag('qNaoFornecida', num(i.quantidade, 4)),
+            tag('uNaoFornecida', limparTexto(i.unidade, 6))) +
+          '</gItemNaoFornecido>',
+      );
+    }
+  }
+
   if (tipo.exigeProtocolo) {
     if (!p.protocolo) throw new Error('Informe o número do protocolo de autorização da NF-e.');
     partes.push(tag('nProt', p.protocolo));
+  }
+
+  if (tipo.exigeVinculoPagamento) {
+    const vp = p.vinculoPagamento;
+    const id = String(vp?.idTransacao || '').trim();
+    if (id.length < 2) throw new Error('Informe o identificador da transação de pagamento (2 a 35 caracteres).');
+    const meio = String(vp?.meioPagamento || '').replace(/\D/g, '');
+    if (!meio) throw new Error('Informe o código do meio de pagamento.');
+    partes.push(
+      `<gPgto idTransacao="${escapar(id.slice(0, 35))}">` +
+        tag('tpMeioPgto', meio.padStart(2, '0')) +
+        tag('CNPJReceb', String(vp?.cnpjRecebedor || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase()) +
+        tag('CNPJBasePSP', String(vp?.cnpjBasePSP || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase()) +
+        '</gPgto>',
+    );
   }
 
   if (tipo.exigeCorrecao) {
@@ -381,7 +488,11 @@ export async function enviarEvento(ctx: Contexto, p: PedidoEvento): Promise<Reto
 
   const ret = await transmitir(ctx, `evento_${tipo.codigo}`, 'RecepcaoEvento', mensagem, {
     chave,
-    uf: tipo.orgaoNacional ? 'AN' : ufPorCodigo(cOrgao) || undefined,
+    // Os eventos da reforma tributária são recebidos pela SVRS para todas as UFs; o
+    // cancelamento genérico (110001) vai para onde foi o evento que ele cancela
+    uf: tipo.orgaoNacional ? 'AN'
+      : (tipo.cancelaEvento ? eventoACancelar(p) : tipo).orgaoSVRS ? 'SVRS'
+      : ufDaNota(ctx, chave) || undefined,
     ambienteNacional: tipo.orgaoNacional,
   });
 
