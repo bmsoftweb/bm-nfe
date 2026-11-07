@@ -1,19 +1,37 @@
 import React, { useEffect, useState } from 'react';
-import { Download, Table2 } from 'lucide-react';
+import { Download, Library, Table2, X } from 'lucide-react';
 import * as api from '../services/api';
 import { Botao, Etiqueta, Secao } from './ui';
 import { AvisoErro, NoCanto } from './AvisoErro';
 import { ColunaGrade, Grade } from './Grade';
 import { formatarData, formatarDataHora } from '../utils/formatters';
 
-const TITULOS: Record<string, string> = { cfop: 'CFOP', ncm: 'NCM' };
+type NomeTabela = api.SituacaoTabela['nome'];
 
-/** CFOP e NCM oficiais dos combos do ERP: só são baixados da fonte quando o usuário pede */
-export const TabelasView: React.FC<{ onVer: (nome: 'cfop' | 'ncm') => void }> = ({ onVer }) => {
+const TITULOS: Record<string, string> = { cfop: 'CFOP', ncm: 'NCM' };
+const TITULOS_ABA: Record<NomeTabela, string> = { cfop: 'Tabela de CFOP', ncm: 'Tabela NCM' };
+
+/**
+ * CFOP e NCM oficiais dos combos do ERP: só são baixados da fonte quando o usuário pede.
+ * O Ver abre a grade da tabela numa aba filha; a faixa de abas só aparece com alguma aberta,
+ * e o X de cada filha a fecha e volta para a 1ª aba.
+ */
+export const TabelasView: React.FC = () => {
   const [tabelas, setTabelas] = useState<api.SituacaoTabela[]>([]);
   const [baixando, setBaixando] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [feito, setFeito] = useState<string | null>(null);
+  const [abertas, setAbertas] = useState<NomeTabela[]>([]);
+  const [ativa, setAtiva] = useState<'tabelas' | NomeTabela>('tabelas');
+
+  const ver = (nome: NomeTabela) => {
+    setAbertas((a) => (a.includes(nome) ? a : [...a, nome]));
+    setAtiva(nome);
+  };
+  const fechar = (nome: NomeTabela) => {
+    setAbertas((a) => a.filter((n) => n !== nome));
+    setAtiva('tabelas');
+  };
 
   const ler = () => api.buscarTabelas().then(setTabelas).catch((e) => setErro(e.message));
   useEffect(() => {
@@ -41,7 +59,7 @@ export const TabelasView: React.FC<{ onVer: (nome: 'cfop' | 'ncm') => void }> = 
   };
 
   return (
-    <div className="flex flex-col">
+    <div className="flex-1 flex flex-col min-h-0">
       {erro && <AvisoErro mensagem={erro} onFechar={() => setErro(null)} />}
       {feito && (
         <NoCanto>
@@ -52,52 +70,107 @@ export const TabelasView: React.FC<{ onVer: (nome: 'cfop' | 'ncm') => void }> = 
         </NoCanto>
       )}
 
-      {tabelas.map((t) => (
-        <Secao
-          key={t.nome}
-          titulo={`${TITULOS[t.nome]} · ${t.tabela}`}
-          descricao={t.fonte}
-          acoes={
-            <>
-              <Botao
-                icone={<Table2 className="w-3.5 h-3.5" />}
-                disabled={!t.total}
-                title={`Abre a tabela de ${TITULOS[t.nome]} numa grade`}
-                onClick={() => onVer(t.nome)}
+      {abertas.length > 0 && (
+        <div className="flex items-stretch bg-stone-100 dark:bg-stone-950 border-b border-stone-200 dark:border-stone-800 overflow-x-auto overflow-y-hidden shrink-0">
+          <button
+            type="button"
+            onClick={() => setAtiva('tabelas')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold whitespace-nowrap border-r border-stone-200 dark:border-stone-800 border-b-2 transition-colors cursor-pointer ${
+              ativa === 'tabelas'
+                ? 'bg-white dark:bg-stone-900 text-blue-700 dark:text-blue-400 border-b-blue-600'
+                : 'border-b-transparent text-stone-600 dark:text-stone-400 hover:bg-stone-200/60 dark:hover:bg-stone-800/60'
+            }`}
+          >
+            <Library className="w-3.5 h-3.5" />
+            <span>Tabelas Fiscais</span>
+          </button>
+          {abertas.map((nome) => (
+            <div
+              key={nome}
+              className={`flex items-center gap-1.5 pl-4 pr-2 border-r border-stone-200 dark:border-stone-800 border-b-2 transition-colors ${
+                ativa === nome
+                  ? 'bg-white dark:bg-stone-900 border-b-blue-600'
+                  : 'border-b-transparent hover:bg-stone-200/60 dark:hover:bg-stone-800/60'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setAtiva(nome)}
+                className={`flex items-center gap-2 py-2.5 text-xs font-semibold whitespace-nowrap cursor-pointer ${
+                  ativa === nome ? 'text-blue-700 dark:text-blue-400' : 'text-stone-600 dark:text-stone-400'
+                }`}
               >
-                Ver
-              </Botao>
-              <Botao
-                variante="primario"
-                icone={<Download className="w-3.5 h-3.5" />}
-                carregando={baixando === t.nome}
-                disabled={!!baixando || !t.existe}
-                onClick={() => atualizar(t.nome)}
+                <Table2 className="w-3.5 h-3.5" />
+                <span>{TITULOS_ABA[nome]}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => fechar(nome)}
+                title="Fechar aba"
+                className="p-1 rounded text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-950/40 transition-colors cursor-pointer shrink-0"
               >
-                {baixando === t.nome ? 'Baixando…' : t.total ? 'Atualizar' : 'Baixar'}
-              </Botao>
-            </>
-          }
-        >
-          {!t.existe ? (
-            <p className="text-xs text-amber-700 dark:text-amber-300">
-              A tabela {t.tabela} não existe no banco: rode o extras/2026-11-07_tabelas_fiscais.sql.
-            </p>
-          ) : (
-            <p className="text-xs text-stone-600 dark:text-stone-300">
-              {t.total
-                ? `${t.total.toLocaleString('pt-BR')} códigos, atualizada em ${formatarDataHora(t.atualizadoEm)}.`
-                : 'Vazia: clique em Baixar.'}
-            </p>
-          )}
-        </Secao>
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Abas filhas continuam montadas enquanto abertas: busca, página e rolagem ficam como estavam */}
+      {abertas.map((nome) => (
+        <div key={nome} className={ativa === nome ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+          <GradeTabela nome={nome} />
+        </div>
       ))}
+
+      <div className={ativa === 'tabelas' ? 'flex flex-col overflow-y-auto' : 'hidden'}>
+        {tabelas.map((t) => (
+          <Secao
+            key={t.nome}
+            titulo={`${TITULOS[t.nome]} · ${t.tabela}`}
+            descricao={t.fonte}
+            acoes={
+              <>
+                <Botao
+                  icone={<Table2 className="w-3.5 h-3.5" />}
+                  disabled={!t.total}
+                  title={`Abre a tabela de ${TITULOS[t.nome]} numa grade`}
+                  onClick={() => ver(t.nome)}
+                >
+                  Ver
+                </Botao>
+                <Botao
+                  variante="primario"
+                  icone={<Download className="w-3.5 h-3.5" />}
+                  carregando={baixando === t.nome}
+                  disabled={!!baixando || !t.existe}
+                  onClick={() => atualizar(t.nome)}
+                >
+                  {baixando === t.nome ? 'Baixando…' : t.total ? 'Atualizar' : 'Baixar'}
+                </Botao>
+              </>
+            }
+          >
+            {!t.existe ? (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                A tabela {t.tabela} não existe no banco: rode o extras/2026-11-07_tabelas_fiscais.sql.
+              </p>
+            ) : (
+              <p className="text-xs text-stone-600 dark:text-stone-300">
+                {t.total
+                  ? `${t.total.toLocaleString('pt-BR')} códigos, atualizada em ${formatarDataHora(t.atualizadoEm)}.`
+                  : 'Vazia: clique em Baixar.'}
+              </p>
+            )}
+          </Secao>
+        ))}
+      </div>
     </div>
   );
 };
 
 // ---------------------------------------------------------------------------
-// Grade de cada tabela (aba fora do menu, aberta pelo Ver)
+// Grade de cada tabela (aba filha, aberta pelo Ver)
 // ---------------------------------------------------------------------------
 
 interface LinhaCfop {
@@ -158,7 +231,7 @@ const COLUNAS_NCM: ColunaGrade<LinhaNcm>[] = [
 ];
 
 /** A tabela de CFOP ou NCM gravada no banco, na grade padrão (só leitura) */
-export const TabelaFiscalView: React.FC<{ nome: 'cfop' | 'ncm' }> = ({ nome }) => (
+const GradeTabela: React.FC<{ nome: NomeTabela }> = ({ nome }) => (
   <div className="flex-1 flex flex-col min-h-0">
     {nome === 'cfop' ? (
       <Grade<LinhaCfop>

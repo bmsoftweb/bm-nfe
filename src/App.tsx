@@ -15,13 +15,7 @@ import { InutilizacaoView } from './components/InutilizacaoView';
 import { DistribuicaoView } from './components/DistribuicaoView';
 import { ConfiguracoesView } from './components/ConfiguracoesView';
 import { LogView } from './components/LogView';
-import { TabelaFiscalView, TabelasView } from './components/TabelasView';
-
-/** Abas MDI fora do menu: a tela de origem continua marcada no menu, e clicar nela volta */
-const ABAS_MDI: Record<string, { rotulo: string; origem: string }> = {
-  tabela_cfop: { rotulo: 'Tabela de CFOP', origem: 'tabelas' },
-  tabela_ncm: { rotulo: 'Tabela NCM', origem: 'tabelas' },
-};
+import { TabelasView } from './components/TabelasView';
 
 const SUBTITULOS: Record<string, string> = {
   painel: 'Indicadores da emissão, certificado e últimas falhas',
@@ -31,8 +25,6 @@ const SUBTITULOS: Record<string, string> = {
   inutilizacao: 'Faixas de numeração que não serão utilizadas',
   distribuicao: 'Documentos emitidos contra o CNPJ, no Ambiente Nacional',
   tabelas: 'CFOP e NCM oficiais dos combos do ERP, baixados sob pedido',
-  tabela_cfop: 'Planilha do Portal Nacional da NF-e, gravada em fis_cfop',
-  tabela_ncm: 'Tabela NCM vigente do Portal Único Siscomex, gravada em fis_ncm',
   configuracoes: 'Certificado, webservices, emitente, arquivos, DANFE e e-mail',
   log: 'Histórico de comunicação com a SEFAZ',
 };
@@ -140,7 +132,7 @@ export default function App() {
     <div className="h-screen overflow-hidden bg-stone-100/70 dark:bg-stone-950 text-stone-900 dark:text-stone-100
       flex font-sans antialiased selection:bg-blue-600 selection:text-white">
       <Sidebar
-        abaAtiva={ABAS_MDI[abaAtiva]?.origem ?? abaAtiva}
+        abaAtiva={abaAtiva}
         onTrocarAba={setAbaAtiva}
         contagens={contagens}
         usuario={usuario}
@@ -152,7 +144,7 @@ export default function App() {
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <Header
-          titulo={item?.rotulo || ABAS_MDI[abaAtiva]?.rotulo || 'BMNFe'}
+          titulo={item?.rotulo || 'BMNFe'}
           subtitulo={SUBTITULOS[abaAtiva]}
           emitente={emitente}
           certificado={certificado}
@@ -185,9 +177,7 @@ export default function App() {
               <InutilizacaoView meta={meta} modeloPadrao={painel?.modelo || '55'} />
             )}
             {abaAtiva === 'distribuicao' && <DistribuicaoView meta={meta} />}
-            {abaAtiva === 'tabelas' && <TabelasView onVer={(nome) => setAbaAtiva(`tabela_${nome}`)} />}
-            {abaAtiva === 'tabela_cfop' && <TabelaFiscalView key="cfop" nome="cfop" />}
-            {abaAtiva === 'tabela_ncm' && <TabelaFiscalView key="ncm" nome="ncm" />}
+            {abaAtiva === 'tabelas' && <TabelasView />}
             {abaAtiva === 'configuracoes' && <ConfiguracoesView meta={meta} onSalvou={recarregar} />}
             {abaAtiva === 'log' && <LogView />}
           </main>
