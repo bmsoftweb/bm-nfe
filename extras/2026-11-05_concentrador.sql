@@ -1,12 +1,12 @@
 -- =====================================================================
--- nfeWeb — concentrador de NF-e (doc/plano-concentrador.md, fases 1 e 2)
+-- BMNFe — concentrador de NF-e (doc/plano-concentrador.md, fases 1 e 2)
 --
 -- Fase 1: contador de numeração por empresa + modelo + série + ambiente, e
 --         número único por série em nfe_documentos.
 -- Fase 2: referência do módulo de origem, única por empresa.
 --
--- Rode uma vez no banco do nfeWeb. Instalações novas já recebem tudo pelo
--- extras/nfeweb_schema.sql.
+-- Rode uma vez no banco do BMNFe. Instalações novas já recebem tudo pelo
+-- extras/bmnfe_schema.sql.
 -- =====================================================================
 
 -- 1) ANTES de tudo: o índice único falha se já houver número repetido.

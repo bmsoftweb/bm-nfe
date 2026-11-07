@@ -6,11 +6,11 @@ import { Emitente, Usuario } from '../types';
  * é guardada; o que autentica as chamadas é o token do login, que vence em 12 horas.
  */
 
-const SESSAO_USUARIO = 'nfeweb_session_user';
-const SESSAO_EMPRESA = 'nfeweb_session_empresa';
-const SESSAO_TOKEN = 'nfeweb_session_token';
+const SESSAO_USUARIO = 'bmnfe_session_user';
+const SESSAO_EMPRESA = 'bmnfe_session_empresa';
+const SESSAO_TOKEN = 'bmnfe_session_token';
 const CHAVES_SESSAO = [SESSAO_USUARIO, SESSAO_EMPRESA, SESSAO_TOKEN];
-const LEMBRETE = 'nfeweb_lembrar_dispositivo';
+const LEMBRETE = 'bmnfe_lembrar_dispositivo';
 
 export interface LembreteLogin {
   cnpj: string;

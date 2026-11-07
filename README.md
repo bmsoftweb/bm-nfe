@@ -1,4 +1,4 @@
-# nfeWeb
+# BMNFe
 
 Conversão do projeto Delphi **ACBrNFe_Exemplo.dpr** (`ACBr/Exemplos/ACBrDFe/ACBrNFe/Delphi`)
 para o layout, o padrão e a pilha do **b2b admin**: React 19 + Vite + Tailwind 4 no
@@ -16,7 +16,7 @@ de endereços dos webservices (`recursos/ACBrNFeServicos.ini`) e os schemas
 npm install
 ```
 
-1. Crie o banco e rode [`extras/nfeweb_schema.sql`](extras/nfeweb_schema.sql).
+1. Crie o banco e rode [`extras/bmnfe_schema.sql`](extras/bmnfe_schema.sql).
    O aplicativo nunca cria tabelas sozinho.
 2. Copie `.env.example` para `.env` e preencha o acesso ao MySQL.
 3. Cadastre uma linha em `nfe_empresas` (o emitente) e uma em `nfe_usuarios`

@@ -462,7 +462,8 @@ function calcularItem(item: ItemNFe, indice: number, op: Operacao): ItemCalculad
   const i = item.imposto;
   const servico = !!i.issqn;
 
-  const bruto = item.valorTotal ?? item.quantidade * item.valorUnitario;
+  // Arredondado como o vProd do item no XML: o total é a soma deles (rejeição 564)
+  const bruto = arred(item.valorTotal ?? item.quantidade * item.valorUnitario);
   if (item.compoeTotal !== false) v[servico ? 'vServ' : 'vProd'] = bruto;
   v.vDesc = item.valorDesconto || 0;
   v.vFrete = item.valorFrete || 0;
@@ -1135,7 +1136,7 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
     tag('indFinal', indFinal),
     tag('indPres', doc.ide.presencial ?? (nfce ? 1 : 0)),
     tag('procEmi', 0),
-    tag('verProc', 'nfeWeb 0.1.0'),
+    tag('verProc', 'BMNFe 0.1.0'),
   );
 
   // ----- emit -----

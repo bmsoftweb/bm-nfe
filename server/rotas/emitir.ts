@@ -1,10 +1,12 @@
 /**
  * Concentrador (doc/plano-concentrador.md, fases 1 e 2): os módulos do ERP mandam
- * a nota em JSON com uma referência própria, e o nfeWeb numera, gera, assina,
+ * a nota em JSON com uma referência própria, e o BMNFe numera, gera, assina,
  * transmite e responde. Mandar a mesma referência de novo nunca cria outra nota:
  * devolve a que existe ou continua de onde parou.
  *
- *   POST /api/emitir              { referencia, documento, sincrono? }
+ *   POST /api/emitir              { referencia, documento, sincrono?, transmitir? }
+ *                                 transmitir: false = numera, gera, assina e valida; a nota fica
+ *                                 "assinada", pronta para o Enviar da tela (nada vai à SEFAZ)
  *   GET  /api/emitir/:referencia  situação, sem transmitir (consulta a SEFAZ se ficou sem resposta)
  *   GET  /api/emitir-pendentes    referências paradas sem autorização (números a inutilizar)
  */
@@ -100,7 +102,7 @@ function resposta(l: Linha, repetida = false) {
  */
 async function criar(ctx: Contexto, referencia: string, documento: any): Promise<Linha> {
   // O nome do lock tem no máximo 64 caracteres; a referência tem até 80
-  const trava = `nfeweb:${crypto.createHash('sha1').update(`${ctx.empresaId}:${referencia}`).digest('hex')}`;
+  const trava = `bmnfe:${crypto.createHash('sha1').update(`${ctx.empresaId}:${referencia}`).digest('hex')}`;
   const con = await pool.getConnection();
   try {
     const [[{ obtida }]] = await con.query<any[]>('SELECT GET_LOCK(?, 15) AS obtida', [trava]);
@@ -171,8 +173,11 @@ async function verificar(ctx: Contexto, l: Linha): Promise<'resolvida' | 'nao_co
   }
 }
 
-/** Gera, assina, valida e transmite. A linha já está "processando" nas mãos desta chamada. */
-async function gerarETransmitir(ctx: Contexto, l: Linha, documento: any, sincrono: boolean) {
+/**
+ * Gera, assina, valida e transmite. A linha já está "processando" nas mãos desta chamada.
+ * Sem transmitir, para depois de gravar o XML assinado e devolve os totais calculados.
+ */
+async function gerarETransmitir(ctx: Contexto, l: Linha, documento: any, sincrono: boolean, transmitir = true) {
   // 539: o número foi usado na SEFAZ por outra chave; esta nota precisa de outro
   const numero = l.codigo_status === 539
     ? await reservarNumero({
@@ -205,6 +210,10 @@ async function gerarETransmitir(ctx: Contexto, l: Linha, documento: any, sincron
     destinatario_nome: dest?.nome || null, valor_total: gerada.totais.vNF, dados, xml,
     recibo: null, protocolo: null, codigo_status: null, motivo: null, xml_protocolo: null,
   });
+  if (!transmitir) {
+    await atualizar(l.id, { situacao: 'assinada' });
+    return gerada.totais;
+  }
   const enviada: Linha = { ...l, chave: gerada.chave, numero, xml, recibo: null };
 
   let ret: Awaited<ReturnType<typeof autorizar>>;
@@ -242,6 +251,7 @@ export function criarRotasEmitir(): Router {
       throw new Error('Informe os dados da nota: documento com ide e itens.');
     }
     const sincrono = req.body?.sincrono !== false;
+    const transmitir = req.body?.transmitir !== false;
     const ctx = await montarContexto(empresaId);
 
     let l = (await buscar(empresaId, referencia)) || (await criar(ctx, referencia, documento));
@@ -281,9 +291,9 @@ export function criarRotasEmitir(): Router {
       });
     }
 
-    await gerarETransmitir(ctx, l, documento, sincrono);
+    const totais = await gerarETransmitir(ctx, l, documento, sincrono, transmitir);
     l = (await buscar(empresaId, referencia))!;
-    res.status(l.situacao === 'enviada' ? 202 : 200).json(resposta(l));
+    res.status(l.situacao === 'enviada' ? 202 : 200).json({ ...resposta(l), ...(totais && { totais }) });
   }));
 
   r.get('/emitir/:referencia', rota(async (req, res) => {

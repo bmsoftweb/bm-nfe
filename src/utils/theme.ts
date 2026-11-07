@@ -1,6 +1,6 @@
 export type ThemeMode = 'light' | 'dark';
 
-const STORAGE_KEY = 'nfeweb_theme';
+const STORAGE_KEY = 'bmnfe_theme';
 
 export function getInitialTheme(): ThemeMode {
   if (typeof window === 'undefined') return 'light';

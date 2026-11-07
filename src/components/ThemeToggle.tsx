@@ -21,7 +21,7 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({
     return (
       <button
         type="button"
-        id="nfeweb-sidebar-btn-theme-toggle"
+        id="bmnfe-sidebar-btn-theme-toggle"
         onClick={onToggle}
         title={isDark ? 'Mudar para Modo Claro' : 'Mudar para Modo Escuro'}
         className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all duration-200 cursor-pointer ${

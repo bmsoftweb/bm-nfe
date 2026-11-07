@@ -5,7 +5,7 @@ const dbConfig: mysql.PoolOptions = {
   port: Number(process.env.MYSQL_PORT) || 3306,
   user: process.env.MYSQL_USER || 'root',
   password: process.env.MYSQL_PASSWORD || '',
-  database: process.env.MYSQL_DATABASE || 'nfeweb',
+  database: process.env.MYSQL_DATABASE || 'bmnfe',
   waitForConnections: true,
   connectionLimit: 10,
   connectTimeout: 20000,
@@ -32,10 +32,11 @@ export const MENSAGEM_CONFIG_FALTANDO =
   'Em execução local isso vem do arquivo .env; na Vercel, de Settings › Environment ' +
   'Variables (e o deploy precisa ser refeito depois de definí-las).';
 
-/** Tabelas criadas pelo extras/nfeweb_schema.sql */
+/** Tabelas criadas pelo extras/bmnfe_schema.sql */
 export const DB_TABLES = [
   'nfe_empresas',
-  'nfe_usuarios',
+  'sys_usuarios',
+  'sys_empresas',
   'nfe_config',
   'nfe_certificados',
   'nfe_documentos',

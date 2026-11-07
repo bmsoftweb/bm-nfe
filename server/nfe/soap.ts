@@ -122,14 +122,11 @@ export function desembrulhar(resposta: string): string {
   return (response ? response[1] : interno).trim();
 }
 
-export async function enviarSoap(op: OpcoesEnvio): Promise<RespostaEnvio> {
-  const envelope = montarEnvelope(op);
-  const inicio = Date.now();
-  const alvo = new URL(op.servico.url);
-
-  const opcoesTls: https.RequestOptions = {
-    key: op.certificado.chavePrivadaPem,
-    cert: [op.certificado.certificadoPem, ...op.certificado.cadeiaPem].join('\n'),
+/** TLS mútuo com o A1 do emitente, pelo proxy da configuração quando houver */
+function opcoesTls(certificado: CertificadoCarregado, proxy?: OpcoesProxy): https.RequestOptions {
+  const opcoes: https.RequestOptions = {
+    key: certificado.chavePrivadaPem,
+    cert: [certificado.certificadoPem, ...certificado.cadeiaPem].join('\n'),
     ca: autoridades(),
     // Vários webservices estaduais ainda negociam com chaves e curvas que o
     // OpenSSL 3 classifica como fracas; sem baixar o nível o handshake falha.
@@ -137,20 +134,24 @@ export async function enviarSoap(op: OpcoesEnvio): Promise<RespostaEnvio> {
     ciphers: 'DEFAULT@SECLEVEL=1',
   };
 
-  if (op.proxy?.host) {
-    const auth = op.proxy.usuario ? `${op.proxy.usuario}:${op.proxy.senha || ''}@` : '';
-    opcoesTls.agent = new HttpsProxyAgent(
-      `http://${auth}${op.proxy.host}:${op.proxy.porta || 8080}`,
-      opcoesTls as any,
-    );
+  if (proxy?.host) {
+    const auth = proxy.usuario ? `${proxy.usuario}:${proxy.senha || ''}@` : '';
+    opcoes.agent = new HttpsProxyAgent(`http://${auth}${proxy.host}:${proxy.porta || 8080}`, opcoes as any);
   }
+  return opcoes;
+}
+
+export async function enviarSoap(op: OpcoesEnvio): Promise<RespostaEnvio> {
+  const envelope = montarEnvelope(op);
+  const inicio = Date.now();
+  const alvo = new URL(op.servico.url);
 
   const corpo = Buffer.from(envelope, 'utf8');
 
   return new Promise<RespostaEnvio>((resolve, reject) => {
     const req = https.request(
       {
-        ...opcoesTls,
+        ...opcoesTls(op.certificado, op.proxy),
         host: alvo.hostname,
         port: alvo.port || 443,
         path: alvo.pathname + alvo.search,
@@ -187,6 +188,39 @@ export async function enviarSoap(op: OpcoesEnvio): Promise<RespostaEnvio> {
     });
 
     req.write(corpo);
+    req.end();
+  });
+}
+
+/**
+ * GET com o mesmo TLS mútuo, para os serviços REST que pedem o certificado
+ * (as tabelas da reforma tributária no Conformidade Fácil da SVRS)
+ */
+export function obterComCertificado(
+  url: string,
+  certificado: CertificadoCarregado,
+  proxy?: OpcoesProxy,
+  timeoutMs = 60000,
+): Promise<{ status: number; corpo: string }> {
+  const alvo = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        ...opcoesTls(certificado, proxy),
+        host: alvo.hostname,
+        port: alvo.port || 443,
+        path: alvo.pathname + alvo.search,
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      },
+      (res) => {
+        const pedacos: Buffer[] = [];
+        res.on('data', (d) => pedacos.push(d));
+        res.on('end', () => resolve({ status: res.statusCode || 0, corpo: Buffer.concat(pedacos).toString('utf8') }));
+      },
+    );
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`O serviço não respondeu em ${timeoutMs / 1000}s.`)));
+    req.on('error', (err) => reject(traduzirErro(err, url)));
     req.end();
   });
 }

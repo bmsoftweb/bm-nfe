@@ -225,4 +225,13 @@ conferir('soma dos totais da nota', () => {
   assert.strictEqual(totais.vNF, 140);
 });
 
+conferir('total dos produtos = soma dos vProd arredondados dos itens', () => {
+  // 2,6791 × 850 = 2277,235 → 2277,24; 1,5 × 712,3456 = 1068,5184 → 1068,52; total 3345,76 (não 3345,75)
+  const item = (quantidade: number, valorUnitario: number) => ({
+    codigo: '1', descricao: 'A', ncm: '44083990', cfop: '5101', unidade: 'M3', quantidade, valorUnitario,
+    imposto: { origem: 0, csosn: '102', pis: { cst: '49' }, cofins: { cst: '49' } },
+  });
+  assert.strictEqual(somarTotais([item(2.6791, 850), item(1.5, 712.3456)] as any, { simples: true }).vProd, 3345.76);
+});
+
 console.log('\nTudo certo.');

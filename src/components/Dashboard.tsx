@@ -40,9 +40,9 @@ export const Dashboard: React.FC<{
         <div className="flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-xs text-amber-900 dark:text-amber-200">
-            <p className="font-bold mb-1">O banco ainda não tem as tabelas do nfeWeb.</p>
+            <p className="font-bold mb-1">O banco ainda não tem as tabelas do BMNFe.</p>
             <p>
-              Rode <code className="font-mono bg-amber-100 dark:bg-amber-900/60 px-1 rounded">extras/nfeweb_schema.sql</code> no
+              Rode <code className="font-mono bg-amber-100 dark:bg-amber-900/60 px-1 rounded">extras/bmnfe_schema.sql</code> no
               banco <strong>{statusBanco.database}</strong>. Faltam:{' '}
               {statusBanco.tabelasFaltando.join(', ')}.
             </p>

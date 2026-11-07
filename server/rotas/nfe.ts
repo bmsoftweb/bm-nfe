@@ -22,6 +22,7 @@ import { proximoNumero } from '../nfe/numeracao.js';
 import {
   autorizar,
   consultarCadastro,
+  consultarClassificacaoTributaria,
   consultarChave,
   consultarRecibo,
   distribuicaoDFe,
@@ -232,6 +233,11 @@ export function criarRotasNFe(): Router {
   r.post('/consultar-recibo', rota(async (req, res) => {
     const ctx = await montarContexto(empresaDaRequisicao(req));
     res.json(await consultarRecibo(ctx, String(req.body?.recibo || '')));
+  }));
+
+  // Tabela oficial do cClassTrib para os módulos do ERP: a API da SVRS pede o certificado, que fica aqui
+  r.get('/tabelas/classificacao-tributaria', rota(async (req, res) => {
+    res.json(await consultarClassificacaoTributaria(await montarContexto(empresaDaRequisicao(req))));
   }));
 
   // =========================================================================
@@ -716,15 +722,15 @@ export function criarRotasNFe(): Router {
   // =========================================================================
   const faltaColuna = (err: any) =>
     err?.code === 'ER_BAD_FIELD_ERROR'
-      ? 'A coluna nfe_usuarios.config_listas ainda não existe: rode extras/2026-09-21_config_listas.sql.'
+      ? 'A coluna sys_usuarios.config_listas ainda não existe.'
       : err?.message;
 
   r.get('/config-listas', rota(async (req, res) => {
     let config: Record<string, unknown> = {};
     try {
       const [linhas] = await pool.query<any[]>(
-        'SELECT config_listas FROM nfe_usuarios WHERE id = ? AND empresa_id = ? LIMIT 1',
-        [req.usuario!.id, req.usuario!.empresaId],
+        'SELECT config_listas FROM sys_usuarios WHERE id = ? LIMIT 1',
+        [req.usuario!.id],
       );
       config = JSON.parse(linhas[0]?.config_listas || '{}') || {};
     } catch {
@@ -741,8 +747,8 @@ export function criarRotasNFe(): Router {
 
     try {
       const [resultado] = await pool.query<any>(
-        'UPDATE nfe_usuarios SET config_listas = ? WHERE id = ? AND empresa_id = ?',
-        [texto, req.usuario!.id, req.usuario!.empresaId],
+        'UPDATE sys_usuarios SET config_listas = ? WHERE id = ?',
+        [texto, req.usuario!.id],
       );
       if (!resultado.affectedRows) {
         res.status(404).json({ success: false, error: 'Usuário da sessão não encontrado.' });

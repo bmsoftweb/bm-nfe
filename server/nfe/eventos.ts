@@ -146,7 +146,7 @@ export const TIPOS_EVENTO: TipoEvento[] = [
   },
 ];
 
-/** Eventos do catálogo que o 110001 cancela (o schema aceita outros, que o nfeWeb não emite) */
+/** Eventos do catálogo que o 110001 cancela (o schema aceita outros, que o BMNFe não emite) */
 export const EVENTOS_CANCELAVEIS = ['110300', '112140', '112150'];
 
 export function acharTipoEvento(codigo: string): TipoEvento {

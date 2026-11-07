@@ -8,7 +8,7 @@
 import zlib from 'zlib';
 import { Contexto, emitenteSemIE, registrarLog } from './contexto.js';
 import { assinar } from './assinatura.js';
-import { enviarSoap } from './soap.js';
+import { enviarSoap, obterComCertificado } from './soap.js';
 import {
   Ambiente,
   CODIGO_UF,
@@ -141,6 +141,22 @@ async function transmitir(
 // ---------------------------------------------------------------------------
 // Consultas
 // ---------------------------------------------------------------------------
+
+/**
+ * Tabela oficial do cClassTrib (IT 2025.002) na API do Conformidade Fácil da SVRS, que só
+ * responde com certificado digital. Devolve o JSON como vem: os CST com as classificações
+ * em classificacoesTributarias (cClassTrib, DescricaoClassTrib, pRedIBS, pRedCBS, Ind…)
+ */
+export async function consultarClassificacaoTributaria(ctx: Contexto): Promise<unknown> {
+  const url = 'https://cff.svrs.rs.gov.br/api/v1/consultas/classTrib';
+  const r = await obterComCertificado(url, ctx.certificado, proxy(ctx));
+  if (r.status !== 200) throw new Error(`A SVRS recusou a consulta da classificação tributária (HTTP ${r.status}).`);
+  try {
+    return JSON.parse(r.corpo);
+  } catch {
+    throw new Error('A SVRS devolveu uma resposta que não é JSON na consulta da classificação tributária.');
+  }
+}
 
 /** Status do serviço na SEFAZ da UF configurada */
 export async function statusServico(ctx: Contexto): Promise<Retorno> {
@@ -343,7 +359,7 @@ export interface PedidoEvento {
   extras?: Record<string, string>;
 }
 
-/** 110001: o evento cancelado, conferido contra os que o nfeWeb emite */
+/** 110001: o evento cancelado, conferido contra os que o BMNFe emite */
 function eventoACancelar(p: PedidoEvento) {
   if (!EVENTOS_CANCELAVEIS.includes(String(p.eventoCancelado))) {
     throw new Error(`Informe o evento a cancelar: ${EVENTOS_CANCELAVEIS.join(', ')}.`);
@@ -360,7 +376,7 @@ function montarDetEvento(tipo: ReturnType<typeof acharTipoEvento>, p: PedidoEven
     if (!/^\d{15}$/.test(p.protocolo || '')) throw new Error('Informe o protocolo (15 dígitos) do evento a cancelar.');
     partes.push(
       tag('cOrgaoAutor', lerChave(p.chave).cUF),
-      tag('verAplic', 'nfeWeb'),
+      tag('verAplic', 'BMNFe'),
       tag('tpEventoAut', alvo.codigo),
       tag('nProtEvento', p.protocolo),
     );
@@ -372,7 +388,7 @@ function montarDetEvento(tipo: ReturnType<typeof acharTipoEvento>, p: PedidoEven
     partes.push(
       tag('cOrgaoAutor', lerChave(p.chave).cUF),
       tag('tpAutor', 1),
-      tag('verAplic', 'nfeWeb'),
+      tag('verAplic', 'BMNFe'),
     );
   }
 

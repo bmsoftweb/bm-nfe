@@ -1,5 +1,5 @@
 /**
- * Autenticação do nfeWeb.
+ * Autenticação do BMNFe.
  *
  * Antes, o login conferia a senha mas não emitia credencial nenhuma: toda chamada
  * depois dele só mandava o header `x-empresa-id`, e o servidor confiava. Qualquer um
@@ -83,11 +83,13 @@ async function carregarUsuario(id: number): Promise<UsuarioSessao | null> {
   const emCache = cacheUsuarios.get(id);
   if (emCache && emCache.ate > Date.now()) return emCache.usuario;
 
+  // Usuário do ERP (sys_usuarios); o emitente é a nfe_empresas com o CNPJ da empresa dele
   const [linhas] = await pool.query<any[]>(
-    `SELECT u.id, u.empresa_id, u.nome, u.email
-       FROM nfe_usuarios u
-       JOIN nfe_empresas e ON e.id = u.empresa_id
-      WHERE u.id = ? AND u.ativo = 1 AND e.ativo = 1
+    `SELECT u.id, e.id AS empresa_id, u.login AS nome, u.login AS email
+       FROM sys_usuarios u
+       JOIN sys_empresas se ON se.id = u.empresa_id
+       JOIN nfe_empresas e ON e.cnpj = se.cnpj COLLATE utf8mb4_unicode_ci
+      WHERE u.id = ? AND u.ativo = 1 AND se.ativo = 1 AND e.ativo = 1
       LIMIT 1`,
     [id],
   );

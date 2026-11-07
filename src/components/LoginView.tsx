@@ -61,7 +61,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ tema, onAlternarTema, avis
           <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40">
             <FileCheck2 className="w-7 h-7 text-blue-600 dark:text-blue-400" />
           </div>
-          <h1 className="text-lg font-bold text-stone-800 dark:text-stone-100">NFe Web</h1>
+          <h1 className="text-lg font-bold text-stone-800 dark:text-stone-100">BMNFe</h1>
           <p className="text-xs text-stone-500 dark:text-stone-400 text-center">
             Emissão, consulta e eventos de NF-e e NFC-e
           </p>

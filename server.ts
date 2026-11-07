@@ -22,12 +22,12 @@ async function iniciar() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`nfeWeb rodando em http://0.0.0.0:${PORT}`);
-    console.log(`MySQL: ${process.env.MYSQL_HOST || 'localhost'} / ${process.env.MYSQL_DATABASE || 'nfeweb'}`);
+    console.log(`BMNFe rodando em http://0.0.0.0:${PORT}`);
+    console.log(`MySQL: ${process.env.MYSQL_HOST || 'localhost'} / ${process.env.MYSQL_DATABASE || 'bmnfe'}`);
   });
 }
 
 iniciar().catch((err) => {
-  console.error('Falha ao iniciar o nfeWeb:', err);
+  console.error('Falha ao iniciar o BMNFe:', err);
   process.exit(1);
 });

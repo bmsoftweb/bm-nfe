@@ -1,7 +1,7 @@
-# nfeWeb como concentrador de NF-e: plano
+# BMNFe como concentrador de NF-e: plano
 
 Objetivo: outros módulos do ERP (PDV, pedidos, faturamento, Delphi ou web)
-mandam os dados da nota e o nfeWeb numera, gera, assina, transmite e devolve o
+mandam os dados da nota e o BMNFe numera, gera, assina, transmite e devolve o
 resultado, sem nota duplicada e sem número repetido.
 
 Este plano cobre as fases 1 e 2, que são as que geram duplicidade na SEFAZ.
@@ -121,6 +121,12 @@ Resposta (igual para a primeira chamada e para as repetidas):
 
 `GET /api/emitir/PDV-000123` devolve a mesma resposta, sem transmitir nada: é
 como o módulo descobre o resultado depois de um timeout.
+
+Com `"transmitir": false` a rota numera, gera, assina e valida, mas para antes da
+SEFAZ: a nota fica `assinada` (pronta para o Enviar da tela de envios) e a resposta
+traz também `totais` (vProd, vNF, vICMS, vPIS, vCOFINS, vIBSUF, vIBSMun, vCBS…).
+Chamar de novo com a mesma referência gera outra vez com o mesmo número. É o que
+usa o "Gerar NFe" do romaneioLamina (referência `ROM-000123`).
 
 ### O que a rota faz com cada situação da referência
 

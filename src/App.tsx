@@ -142,7 +142,7 @@ export default function App() {
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <Header
-          titulo={item?.rotulo || 'NFe Web'}
+          titulo={item?.rotulo || 'BMNFe'}
           subtitulo={SUBTITULOS[abaAtiva]}
           emitente={emitente}
           certificado={certificado}

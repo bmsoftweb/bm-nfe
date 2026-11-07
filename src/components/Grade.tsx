@@ -34,7 +34,7 @@ export interface ColunaGrade<T> {
 }
 
 interface GradeProps<T> {
-  /** Chave das preferências em nfe_usuarios.config_listas */
+  /** Chave das preferências em sys_usuarios.config_listas */
   recurso: string;
   colunas: ColunaGrade<T>[];
   carregarPagina: (consulta: ConsultaGrade) => Promise<PaginaGrade<T>>;

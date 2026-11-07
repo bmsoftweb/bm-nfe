@@ -1,5 +1,5 @@
 -- =====================================================================
--- nfeWeb — estrutura do banco
+-- BMNFe — estrutura do banco
 -- Rode este script no MySQL antes de subir o app. O aplicativo NUNCA cria
 -- tabelas sozinho.
 -- =====================================================================

@@ -59,7 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         style={{ height: 'var(--altura-topo)' }}
       >
         <div className="min-w-0">
-          <div className="text-sm font-bold text-stone-800 dark:text-stone-100">NFe Web</div>
+          <div className="text-sm font-bold text-stone-800 dark:text-stone-100">BMNFe</div>
           <div className="text-[11px] text-stone-500 dark:text-stone-400 truncate">{razaoSocial}</div>
         </div>
         <button

@@ -1,7 +1,7 @@
 import { buscarConfigListas, gravarConfigListas } from '../services/api';
 
 /**
- * Preferências de cada grade, gravadas em nfe_usuarios.config_listas como JSON.
+ * Preferências de cada grade, gravadas em sys_usuarios.config_listas como JSON.
  * Mesmo formato do usuarios.config_listas do b2b admin.
  */
 

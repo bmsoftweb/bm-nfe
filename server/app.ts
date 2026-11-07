@@ -79,12 +79,14 @@ export function createApp() {
         return res.status(401).json({ success: false, error: 'Este emitente está inativo.' });
       }
 
+      // Usuários do ERP (sys_usuarios), ligados ao emitente pelo CNPJ da empresa
       const [usuarios] = await pool.query<any[]>(
-        `SELECT id, empresa_id, nome, email, senha_hash, cargo
-           FROM nfe_usuarios
-          WHERE empresa_id = ? AND (LOWER(TRIM(email)) = ? OR LOWER(TRIM(nome)) = ?) AND ativo = 1
+        `SELECT u.id, u.login AS nome, u.login AS email, u.senha_hash
+           FROM sys_usuarios u
+           JOIN sys_empresas se ON se.id = u.empresa_id
+          WHERE se.cnpj = ? AND LOWER(TRIM(u.login)) = ? AND u.ativo = 1 AND se.ativo = 1
           LIMIT 1`,
-        [empresa.id, login, login],
+        [cnpjLimpo, login],
       );
       if (!usuarios.length) {
         return res.status(401).json({ success: false, error: `Usuário "${login}" não localizado neste emitente.` });
@@ -109,13 +111,14 @@ export function createApp() {
 
       // Senha ausente ou em formato legado vira bcrypt neste acesso
       if (semSenhaCadastrada || !/^\$2[aby]\$/.test(encontrado.senha_hash)) {
-        await pool.query('UPDATE nfe_usuarios SET senha_hash = ? WHERE id = ?', [
+        await pool.query('UPDATE sys_usuarios SET senha_hash = ? WHERE id = ?', [
           bcrypt.hashSync(informada, 10),
           encontrado.id,
         ]);
       }
 
       delete encontrado.senha_hash;
+      encontrado.empresa_id = empresa.id;
       // O token é a credencial das próximas chamadas: é dele que sai a empresa
       const token = criarToken(Number(encontrado.id), Number(empresa.id));
       res.json({ success: true, token, usuario: encontrado, empresa });
