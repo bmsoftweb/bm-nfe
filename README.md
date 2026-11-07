@@ -116,6 +116,7 @@ São dois roteiros, sem rede e sem banco:
 | Eventos | Eventos (cancelamento, carta de correção, manifestação) |
 | Inutilização | Inutilização |
 | Distribuição DFe | Distribuição DF-e (por último NSU, NSU e chave, com manifestação na lista) |
+| — (não existe no Delphi) | Tabelas Fiscais: CFOP e NCM oficiais dos combos do ERP (`fis_cfop`, `fis_ncm`), baixados da fonte só no botão; tabelas criadas pelo [`extras/2026-11-07_tabelas_fiscais.sql`](extras/2026-11-07_tabelas_fiscais.sql) |
 | Respostas / XML Resposta / Log / Retorno Completo WS / Dados | Painel de respostas embaixo de cada tela, e a tela Log de Comunicação |
 
 ## Arquitetura

@@ -19,6 +19,7 @@ import { dataHoraMysql, paraBR } from '../nfe/datas.js';
 import { recortarElemento, semDeclaracao, valorTag } from '../nfe/xml.js';
 import { FalhaSchema, exigirValido, validarNFe, validarQualquer } from '../nfe/validacao.js';
 import { proximoNumero } from '../nfe/numeracao.js';
+import { atualizarTabela, situacaoTabelas } from '../tabelas.js';
 import {
   autorizar,
   consultarCadastro,
@@ -238,6 +239,15 @@ export function criarRotasNFe(): Router {
   // Tabela oficial do cClassTrib para os módulos do ERP: a API da SVRS pede o certificado, que fica aqui
   r.get('/tabelas/classificacao-tributaria', rota(async (req, res) => {
     res.json(await consultarClassificacaoTributaria(await montarContexto(empresaDaRequisicao(req))));
+  }));
+
+  // CFOP e NCM dos combos do ERP: baixados da fonte oficial só quando o usuário pede (tela Tabelas Fiscais)
+  r.get('/tabelas', rota(async (_req, res) => {
+    res.json(await situacaoTabelas());
+  }));
+
+  r.post('/tabelas/:nome/atualizar', rota(async (req, res) => {
+    res.json(await atualizarTabela(req.params.nome));
   }));
 
   // =========================================================================

@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   LayoutDashboard, FileText, Search, CalendarClock, Ban, Inbox, Settings, ScrollText,
-  LogOut, X, User, type LucideIcon,
+  LogOut, X, User, Library, type LucideIcon,
 } from 'lucide-react';
 import { Usuario } from '../types';
 
@@ -20,6 +20,7 @@ export const MENU: ItemMenu[] = [
   { id: 'eventos', rotulo: 'Eventos', icone: CalendarClock, grupo: 'Operação' },
   { id: 'inutilizacao', rotulo: 'Inutilização', icone: Ban, grupo: 'Operação' },
   { id: 'distribuicao', rotulo: 'Distribuição DF-e', icone: Inbox, grupo: 'Operação' },
+  { id: 'tabelas', rotulo: 'Tabelas Fiscais', icone: Library, grupo: 'Sistema' },
   { id: 'configuracoes', rotulo: 'Configurações', icone: Settings, grupo: 'Sistema' },
   { id: 'log', rotulo: 'Log de Comunicação', icone: ScrollText, grupo: 'Sistema' },
 ];
