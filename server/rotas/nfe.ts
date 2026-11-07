@@ -636,9 +636,11 @@ export function criarRotasNFe(): Router {
     busca: string[];
     ordemPadrao: string;
     direcaoPadrao: 'asc' | 'desc';
+    /** Tabela sem empresa_id, igual para todas as empresas (as tabelas fiscais) */
+    global?: boolean;
   }) =>
     rota(async (req, res) => {
-      const empresaId = empresaDaRequisicao(req);
+      const empresa = def.global ? [] : [empresaDaRequisicao(req)];
       const porPagina = [10, 25, 50, 100].includes(Number(req.query.porPagina)) ? Number(req.query.porPagina) : 25;
       const pagina = Math.max(1, Math.floor(Number(req.query.pagina) || 1));
       const ordem = def.ordenaveis[String(req.query.ordem)] || def.ordenaveis[def.ordemPadrao];
@@ -647,16 +649,17 @@ export function criarRotasNFe(): Router {
       const termo = String(req.query.busca || '').trim();
       const filtro = termo ? ` AND (${def.busca.map((c) => `${c} LIKE ?`).join(' OR ')})` : '';
       const params = termo ? def.busca.map(() => `%${termo}%`) : [];
+      const onde = `WHERE ${def.global ? '1 = 1' : 'empresa_id = ?'}${filtro}`;
 
       const [[{ total }]] = await pool.query<any[]>(
-        `SELECT COUNT(*) AS total FROM ${def.tabela} WHERE empresa_id = ?${filtro}`,
-        [empresaId, ...params],
+        `SELECT COUNT(*) AS total FROM ${def.tabela} ${onde}`,
+        [...empresa, ...params],
       );
       // O id desempata a ordenação, para a paginação não repetir nem pular linha
       const [linhas] = await pool.query<any[]>(
-        `SELECT ${def.colunas} FROM ${def.tabela} WHERE empresa_id = ?${filtro}
+        `SELECT ${def.colunas} FROM ${def.tabela} ${onde}
           ORDER BY ${ordem} ${direcao}, id ${direcao} LIMIT ? OFFSET ?`,
-        [empresaId, ...params, porPagina, (pagina - 1) * porPagina],
+        [...empresa, ...params, porPagina, (pagina - 1) * porPagina],
       );
 
       res.json({ data: linhas, total: Number(total), totalPages: Math.max(1, Math.ceil(Number(total) / porPagina)) });
@@ -724,6 +727,35 @@ export function criarRotasNFe(): Router {
     busca: ['operacao', 'chave', 'motivo', 'CAST(codigo_status AS CHAR)'],
     ordemPadrao: 'criado_em',
     direcaoPadrao: 'desc',
+  }));
+
+  // Tabelas fiscais (tela Tabelas Fiscais › Ver): só leitura
+  const INDICADORES_CFOP = 'ind_nfe, ind_comunica, ind_transp, ind_devol, ind_retor, ind_anula, ind_remes, ind_comb, ind_exc_ibscbs';
+  r.get('/tabelas/cfop', paginada({
+    tabela: 'fis_cfop',
+    global: true,
+    colunas: `id, cfop, titulo, descricao, inicio_vigencia, fim_vigencia, ${INDICADORES_CFOP}`,
+    ordenaveis: {
+      cfop: 'cfop', titulo: 'titulo', inicio_vigencia: 'inicio_vigencia', fim_vigencia: 'fim_vigencia',
+      ...Object.fromEntries(INDICADORES_CFOP.split(', ').map((c) => [c, c])),
+    },
+    busca: ['cfop', 'titulo', 'descricao'],
+    ordemPadrao: 'cfop',
+    direcaoPadrao: 'asc',
+  }));
+
+  r.get('/tabelas/ncm', paginada({
+    tabela: 'fis_ncm',
+    global: true,
+    colunas: 'id, ncm, nome, descricao, inicio_vigencia, fim_vigencia, ato_legal',
+    ordenaveis: {
+      ncm: 'ncm', nome: 'nome', descricao: 'descricao', inicio_vigencia: 'inicio_vigencia',
+      fim_vigencia: 'fim_vigencia', ato_legal: 'ato_legal',
+    },
+    // O NCM aparece com pontos na grade (0000.00.00): a busca acha nos dois formatos
+    busca: ['ncm', "CONCAT(LEFT(ncm, 4), '.', SUBSTRING(ncm, 5, 2), '.', RIGHT(ncm, 2))", 'descricao', 'ato_legal'],
+    ordemPadrao: 'ncm',
+    direcaoPadrao: 'asc',
   }));
 
   // =========================================================================

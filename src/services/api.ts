@@ -213,6 +213,8 @@ export interface SituacaoTabela {
 
 export const buscarTabelas = () => pedir<SituacaoTabela[]>('/tabelas');
 export const atualizarTabela = (nome: string) => post<{ total: number; versao: string }>(`/tabelas/${nome}/atualizar`);
+export const listarCfop = (c: ConsultaGrade) => pedir<PaginaGrade<any>>(`/tabelas/cfop?${paraQuery(c)}`);
+export const listarNcm = (c: ConsultaGrade) => pedir<PaginaGrade<any>>(`/tabelas/ncm?${paraQuery(c)}`);
 
 // ---------------------------------------------------------------------------
 // Preferências das grades

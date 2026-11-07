@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { Download } from 'lucide-react';
+import { Download, Table2 } from 'lucide-react';
 import * as api from '../services/api';
-import { Botao, Secao } from './ui';
+import { Botao, Etiqueta, Secao } from './ui';
 import { AvisoErro, NoCanto } from './AvisoErro';
-import { formatarDataHora } from '../utils/formatters';
+import { ColunaGrade, Grade } from './Grade';
+import { formatarData, formatarDataHora } from '../utils/formatters';
 
 const TITULOS: Record<string, string> = { cfop: 'CFOP', ncm: 'NCM' };
 
 /** CFOP e NCM oficiais dos combos do ERP: só são baixados da fonte quando o usuário pede */
-export const TabelasView: React.FC = () => {
+export const TabelasView: React.FC<{ onVer: (nome: 'cfop' | 'ncm') => void }> = ({ onVer }) => {
   const [tabelas, setTabelas] = useState<api.SituacaoTabela[]>([]);
   const [baixando, setBaixando] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -57,15 +58,25 @@ export const TabelasView: React.FC = () => {
           titulo={`${TITULOS[t.nome]} · ${t.tabela}`}
           descricao={t.fonte}
           acoes={
-            <Botao
-              variante="primario"
-              icone={<Download className="w-3.5 h-3.5" />}
-              carregando={baixando === t.nome}
-              disabled={!!baixando || !t.existe}
-              onClick={() => atualizar(t.nome)}
-            >
-              {baixando === t.nome ? 'Baixando…' : t.total ? 'Atualizar' : 'Baixar'}
-            </Botao>
+            <>
+              <Botao
+                icone={<Table2 className="w-3.5 h-3.5" />}
+                disabled={!t.total}
+                title={`Abre a tabela de ${TITULOS[t.nome]} numa grade`}
+                onClick={() => onVer(t.nome)}
+              >
+                Ver
+              </Botao>
+              <Botao
+                variante="primario"
+                icone={<Download className="w-3.5 h-3.5" />}
+                carregando={baixando === t.nome}
+                disabled={!!baixando || !t.existe}
+                onClick={() => atualizar(t.nome)}
+              >
+                {baixando === t.nome ? 'Baixando…' : t.total ? 'Atualizar' : 'Baixar'}
+              </Botao>
+            </>
           }
         >
           {!t.existe ? (
@@ -84,3 +95,89 @@ export const TabelasView: React.FC = () => {
     </div>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Grade de cada tabela (aba fora do menu, aberta pelo Ver)
+// ---------------------------------------------------------------------------
+
+interface LinhaCfop {
+  id: number;
+  cfop: string;
+  titulo: string;
+  descricao: string | null;
+  inicio_vigencia: string | null;
+  fim_vigencia: string | null;
+  /** ind_nfe, ind_devol…: 0 ou 1; ind_comb: 0, 1 ou 2 */
+  [indicador: string]: string | number | null;
+}
+
+interface LinhaNcm {
+  id: number;
+  ncm: string;
+  nome: string;
+  descricao: string;
+  inicio_vigencia: string | null;
+  fim_vigencia: string | null;
+  ato_legal: string | null;
+}
+
+const simNao = (v: unknown) =>
+  Number(v) ? (
+    <Etiqueta texto="Sim" classe="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" />
+  ) : (
+    <Etiqueta texto="Não" classe="bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400" />
+  );
+
+const INDICADORES_CFOP: [string, string][] = [
+  ['ind_nfe', 'NF-e'],
+  ['ind_comunica', 'Comunicação'],
+  ['ind_transp', 'Transporte'],
+  ['ind_devol', 'Devolução'],
+  ['ind_retor', 'Retorno'],
+  ['ind_anula', 'Anulação'],
+  ['ind_remes', 'Remessa'],
+  ['ind_exc_ibscbs', 'Exclusivo IBS/CBS'],
+];
+
+const COLUNAS_CFOP: ColunaGrade<LinhaCfop>[] = [
+  { nome: 'cfop', rotulo: 'CFOP', valor: (l) => l.cfop },
+  { nome: 'titulo', rotulo: 'Título', valor: (l) => l.titulo, dica: (l) => l.descricao || l.titulo },
+  { nome: 'inicio_vigencia', rotulo: 'Início vigência', tipo: 'data', valor: (l) => formatarData(l.inicio_vigencia) },
+  { nome: 'fim_vigencia', rotulo: 'Fim vigência', tipo: 'data', valor: (l) => formatarData(l.fim_vigencia) },
+  ...INDICADORES_CFOP.map(([nome, rotulo]): ColunaGrade<LinhaCfop> => ({ nome, rotulo, tipo: 'centro', valor: (l) => simNao(l[nome]) })),
+  { nome: 'ind_comb', rotulo: 'Combustível', tipo: 'numero', valor: (l) => l.ind_comb },
+];
+
+const COLUNAS_NCM: ColunaGrade<LinhaNcm>[] = [
+  { nome: 'ncm', rotulo: 'NCM', valor: (l) => `${l.ncm.slice(0, 4)}.${l.ncm.slice(4, 6)}.${l.ncm.slice(6)}` },
+  { nome: 'nome', rotulo: 'Nome (combos)', valor: (l) => l.nome, dica: (l) => l.nome },
+  { nome: 'descricao', rotulo: 'Descrição completa', valor: (l) => l.descricao, dica: (l) => l.descricao },
+  { nome: 'inicio_vigencia', rotulo: 'Início vigência', tipo: 'data', valor: (l) => formatarData(l.inicio_vigencia) },
+  { nome: 'fim_vigencia', rotulo: 'Fim vigência', tipo: 'data', valor: (l) => formatarData(l.fim_vigencia) },
+  { nome: 'ato_legal', rotulo: 'Ato legal', valor: (l) => l.ato_legal || '—' },
+];
+
+/** A tabela de CFOP ou NCM gravada no banco, na grade padrão (só leitura) */
+export const TabelaFiscalView: React.FC<{ nome: 'cfop' | 'ncm' }> = ({ nome }) => (
+  <div className="flex-1 flex flex-col min-h-0">
+    {nome === 'cfop' ? (
+      <Grade<LinhaCfop>
+        recurso="tabela_cfop"
+        colunas={COLUNAS_CFOP}
+        carregarPagina={api.listarCfop}
+        chave={(l) => l.id}
+        ordemPadrao={{ campo: 'cfop', direcao: 'asc' }}
+        rotuloVazio="Nenhum CFOP encontrado"
+      />
+    ) : (
+      <Grade<LinhaNcm>
+        recurso="tabela_ncm"
+        colunas={COLUNAS_NCM}
+        carregarPagina={api.listarNcm}
+        chave={(l) => l.id}
+        ordemPadrao={{ campo: 'ncm', direcao: 'asc' }}
+        rotuloVazio="Nenhum NCM encontrado"
+      />
+    )}
+  </div>
+);
