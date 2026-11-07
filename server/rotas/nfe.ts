@@ -5,12 +5,12 @@
  */
 import { Request, Response, Router } from 'express';
 import { pool } from '../db.js';
-import { CONFIG_PADRAO, gravarConfig, lerConfig, preservarSegredos, semSegredos } from '../config.js';
+import { CONFIG_PADRAO, ConfigNFe, gravarConfig, lerConfig, preservarSegredos, semSegredos } from '../config.js';
 import { carregarCertificado, esquecerCertificado, montarContexto, carregarEmitente } from '../nfe/contexto.js';
 import { carregarPfx } from '../nfe/certificado.js';
 import { assinar, conferirAssinatura } from '../nfe/assinatura.js';
 import { gerarNFe } from '../nfe/gerarNFe.js';
-import { gerarDanfe } from '../nfe/danfe.js';
+import { OpcoesDanfe, gerarDanfe } from '../nfe/danfe.js';
 import { enviarEmail, testarSmtp } from '../nfe/email.js';
 import { TIPOS_EVENTO } from '../nfe/eventos.js';
 import { UFS } from '../nfe/servicos.js';
@@ -540,6 +540,14 @@ export function criarRotasNFe(): Router {
   // =========================================================================
   // DANFE e e-mail
   // =========================================================================
+  /** Mesma impressão na tela e no anexo do e-mail: logomarca, orientação e tarja vêm da configuração */
+  const opcoesDanfe = (config: ConfigNFe, xml: string): OpcoesDanfe => ({
+    logo: config.danfe.logoMarca,
+    expandirLogo: config.danfe.expandirLogo,
+    homologacao: Number(valorTag(xml, 'tpAmb')) === 2,
+    paisagem: config.danfe.tipoDanfe === 1,
+  });
+
   r.post('/danfe', rota(async (req, res) => {
     const empresaId = empresaDaRequisicao(req);
     const config = await lerConfig(empresaId);
@@ -554,11 +562,7 @@ export function criarRotasNFe(): Router {
     }
     if (!xml) throw new Error('Nenhum XML encontrado para gerar o DANFE.');
 
-    const pdf = await gerarDanfe(xml, {
-      logo: config.danfe.logoMarca,
-      homologacao: Number(valorTag(xml, 'tpAmb')) === 2,
-      paisagem: config.danfe.tipoDanfe === 1,
-    });
+    const pdf = await gerarDanfe(xml, opcoesDanfe(config, xml));
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="DANFE-${req.body?.chave || 'nfe'}.pdf"`);
@@ -582,7 +586,7 @@ export function criarRotasNFe(): Router {
     if (anexarPdf !== false) {
       anexos.push({
         nome: `${d.chave}-danfe.pdf`,
-        conteudo: (await gerarDanfe(xml, { homologacao: Number(valorTag(xml, 'tpAmb')) === 2 })) as any,
+        conteudo: (await gerarDanfe(xml, opcoesDanfe(config, xml))) as any,
         tipo: 'application/pdf',
       });
     }

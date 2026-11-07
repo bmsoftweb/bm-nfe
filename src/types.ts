@@ -75,6 +75,7 @@ export interface ConfigNFe {
   };
   danfe: {
     logoMarca: string;
+    expandirLogo: boolean;
     tipoDanfe: number;
     tipoDanfce: number;
     imprimirHomologacao: boolean;

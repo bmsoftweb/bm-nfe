@@ -6,6 +6,7 @@
  * obrigatórios, canhoto, código de barras CODE128C da chave e tabela de itens.
  * Para a NFC-e sai o DANFE simplificado em bobina, com o QR-Code.
  */
+import fs from 'node:fs/promises';
 import PDFDocument from 'pdfkit';
 import bwipjs from 'bwip-js/node';
 import { lerXml, valorTag } from './xml.js';
@@ -13,10 +14,17 @@ import { paraBR } from './datas.js';
 
 const MM = 2.834645669; // 1 mm em pontos
 const CINZA = '#444444';
+/** Espessura das bordas: 0,25 pt é cerca de um ponto de impressora a 300 dpi (linha bem fina) */
+const LINHA = 0.25;
+/** Raio dos cantos arredondados dos quadros */
+const RAIO = 2;
+/** Altura das maiúsculas e dígitos em relação ao tamanho da fonte (Helvetica): base da centralização vertical */
+const ALTURA_MAIUSCULA = 0.72;
 
+/** Valor com casas fixas; zero ou ausente sai "0,00", como pede o quadro do DANFE */
 function moeda(valor: any, casas = 2): string {
-  const n = Number(valor);
-  if (!Number.isFinite(n) || n === 0) return '';
+  const n = Number(valor ?? 0);
+  if (!Number.isFinite(n)) return '';
   return n.toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas });
 }
 
@@ -44,9 +52,37 @@ async function qrcode(texto: string): Promise<Buffer> {
   return bwipjs.toBuffer({ bcid: 'qrcode', text: texto, scale: 4, includetext: false });
 }
 
+/** Imagem da logomarca (URL, data: URI ou caminho no servidor); sem ela o DANFE sai só com o texto */
+async function carregarLogo(origem?: string): Promise<Buffer | null> {
+  const s = origem?.trim();
+  if (!s) return null;
+  try {
+    if (s.startsWith('data:')) return Buffer.from(s.slice(s.indexOf(',') + 1), 'base64');
+    if (/^https?:\/\//i.test(s)) {
+      const r = await fetch(s, { signal: AbortSignal.timeout(10000) });
+      return r.ok ? Buffer.from(await r.arrayBuffer()) : null;
+    }
+    return await fs.readFile(s);
+  } catch {
+    return null;
+  }
+}
+
+/** modFrete no quadro do transportador */
+const MODALIDADE_FRETE: Record<string, string> = {
+  '0': '0 - Remetente (CIF)',
+  '1': '1 - Destinatário (FOB)',
+  '2': '2 - Terceiros',
+  '3': '3 - Próprio Remetente',
+  '4': '4 - Próprio Destinatário',
+  '9': '9 - Sem Frete',
+};
+
 export interface OpcoesDanfe {
-  /** URL ou caminho de imagem da logomarca */
+  /** URL, data: URI ou caminho de imagem da logomarca (PNG ou JPEG) */
   logo?: string;
+  /** A logomarca já traz nome e endereço: ocupa o quadro do emitente inteiro, sem os dados dele */
+  expandirLogo?: boolean;
   /** Imprime a tarja de homologação */
   homologacao?: boolean;
   paisagem?: boolean;
@@ -91,15 +127,20 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
   const dataProtocolo = valorTag(xml, 'dhRecbto');
 
   const quadro = (x: number, y: number, w: number, h: number) => {
-    pdf.lineWidth(0.5).strokeColor(CINZA).rect(x, y, w, h).stroke();
+    pdf.lineWidth(LINHA).strokeColor(CINZA).roundedRect(x, y, w, h, RAIO).stroke();
   };
+
+  /** Topo do texto para as maiúsculas ficarem no meio do espaço entre `de` e `ate` */
+  const centroVertical = (de: number, ate: number, tamanho: number) => de + (ate - de - tamanho * ALTURA_MAIUSCULA) / 2;
 
   const campo = (x: number, y: number, w: number, h: number, rotulo: string, valor: string, opts: { tamanho?: number; centro?: boolean; direita?: boolean } = {}) => {
     quadro(x, y, w, h);
-    pdf.fontSize(4.6).fillColor(CINZA).font('Helvetica').text(rotulo.toUpperCase(), x + 2, y + 1.5, { width: w - 4, lineBreak: false });
-    pdf.fontSize(opts.tamanho ?? 7).fillColor('#000').font('Helvetica-Bold').text(valor || '', x + 2, y + 7, {
+    const tamRotulo = 4.6;
+    pdf.fontSize(tamRotulo).fillColor(CINZA).font('Helvetica').text(rotulo.toUpperCase(), x + 2, y + 1.5, { width: w - 4, lineBreak: false });
+    // O valor fica centrado no espaço que sobra abaixo do rótulo
+    const tamanho = opts.tamanho ?? 7;
+    pdf.fontSize(tamanho).fillColor('#000').font('Helvetica-Bold').text(valor || '', x + 2, centroVertical(y + 1.5 + tamRotulo * ALTURA_MAIUSCULA, y + h, tamanho), {
       width: w - 4,
-      height: h - 8,
       align: opts.centro ? 'center' : opts.direita ? 'right' : 'left',
       lineBreak: false,
     });
@@ -134,18 +175,35 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
   const largDanfe = larg * 0.22;
 
   quadro(esq, y, largEmit, alturaCab);
-  pdf.fontSize(9).font('Helvetica-Bold').fillColor('#000')
-    .text(inf.emit?.xNome || '', esq + 3, y + 3, { width: largEmit - 6 });
-  const ender = inf.emit?.enderEmit || {};
-  pdf.fontSize(6).font('Helvetica').text(
-    [
-      `${ender.xLgr || ''}, ${ender.nro || ''} ${ender.xCpl || ''}`.trim(),
-      `${ender.xBairro || ''} - ${ender.xMun || ''}/${ender.UF || ''}`,
-      `CEP ${ender.CEP || ''}   Fone ${ender.fone || ''}`,
-      `CNPJ ${inf.emit?.CNPJ || ''}   IE ${inf.emit?.IE || ''}`,
-    ].join('\n'),
-    esq + 3, y + 16, { width: largEmit - 6 },
-  );
+  // Logomarca: ou ocupa o quadro inteiro (já traz nome e endereço), ou fica à esquerda dos dados do emitente
+  const logo = await carregarLogo(opcoes.logo);
+  let larguraLogo = 0;
+  if (logo) {
+    const expandir = !!opcoes.expandirLogo;
+    const caixa: [number, number] = expandir ? [largEmit - 6, alturaCab - 6] : [alturaCab - 6, alturaCab - 6];
+    try {
+      pdf.image(logo, esq + 3, y + 3, { fit: caixa, align: 'center', valign: 'center' });
+      larguraLogo = expandir ? largEmit : caixa[0] + 3;
+    } catch {
+      // Não é PNG nem JPEG: sai só o texto
+    }
+  }
+  if (larguraLogo < largEmit) {
+    const xTexto = esq + 3 + larguraLogo;
+    const largTexto = largEmit - 6 - larguraLogo;
+    pdf.fontSize(9).font('Helvetica-Bold').fillColor('#000')
+      .text(inf.emit?.xNome || '', xTexto, y + 3, { width: largTexto });
+    const ender = inf.emit?.enderEmit || {};
+    pdf.fontSize(6).font('Helvetica').text(
+      [
+        `${ender.xLgr || ''}, ${ender.nro || ''} ${ender.xCpl || ''}`.trim(),
+        `${ender.xBairro || ''} - ${ender.xMun || ''}/${ender.UF || ''}`,
+        `CEP ${ender.CEP || ''}   Fone ${ender.fone || ''}`,
+        `CNPJ ${inf.emit?.CNPJ || ''}   IE ${inf.emit?.IE || ''}`,
+      ].join('\n'),
+      xTexto, pdf.y + 4, { width: largTexto },
+    );
+  }
 
   quadro(esq + largEmit, y, largDanfe, alturaCab);
   pdf.fontSize(12).font('Helvetica-Bold').text('DANFE', esq + largEmit, y + 3, { width: largDanfe, align: 'center' });
@@ -185,7 +243,7 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
   campo(esq, y, larg / 3, 7 * MM, 'Inscrição Estadual', inf.emit?.IE || '');
   campo(esq + larg / 3, y, larg / 3, 7 * MM, 'Inscr. Estadual do Subst. Tributário', inf.emit?.IEST || '');
   campo(esq + (2 * larg) / 3, y, larg / 3, 7 * MM, 'CNPJ', inf.emit?.CNPJ || '');
-  y += 7 * MM;
+  y += 7 * MM + 2 * MM;
 
   // ---- Destinatário ----
   pdf.fontSize(6).font('Helvetica-Bold').fillColor('#000').text('DESTINATÁRIO / REMETENTE', esq, y + 1);
@@ -288,6 +346,49 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
     y += 2 * MM;
   }
 
+  // ---- Transportador / volumes ----
+  const transp = inf.transp || {};
+  const transporta = transp.transporta || {};
+  const veiculo = transp.veicTransp || {};
+  const volumes = comoLista<any>(transp.vol);
+  // Vários grupos de volume viram uma linha: quantidades e pesos somados, textos diferentes juntados
+  const somaVolumes = (tag: string) => volumes.reduce((s, v) => s + Number(v[tag] || 0), 0);
+  const textoVolumes = (tag: string) => [...new Set(volumes.map((v) => v[tag]).filter(Boolean))].join(' / ');
+
+  pdf.fontSize(6).font('Helvetica-Bold').fillColor('#000').text('TRANSPORTADOR / VOLUMES TRANSPORTADOS', esq, y + 1);
+  y += 5 * MM;
+  const linhaTransp = (linha: [string, string, number, ('centro' | 'direita')?][]) => {
+    let x = esq;
+    for (const [rotulo, valor, fracao, alinhar] of linha) {
+      campo(x, y, larg * fracao, 7 * MM, rotulo, valor, { centro: alinhar === 'centro', direita: alinhar === 'direita' });
+      x += larg * fracao;
+    }
+    y += 7 * MM;
+  };
+  linhaTransp([
+    ['Nome / Razão Social', transporta.xNome || '', 0.3],
+    ['Frete por Conta', MODALIDADE_FRETE[String(transp.modFrete ?? '')] || String(transp.modFrete ?? ''), 0.16],
+    ['Código ANTT', veiculo.RNTC || '', 0.11],
+    ['Placa do Veículo', veiculo.placa || '', 0.11, 'centro'],
+    ['UF', veiculo.UF || '', 0.05, 'centro'],
+    ['CNPJ / CPF', transporta.CNPJ || transporta.CPF || '', 0.27],
+  ]);
+  linhaTransp([
+    ['Endereço', transporta.xEnder || '', 0.41],
+    ['Município', transporta.xMun || '', 0.27],
+    ['UF', transporta.UF || '', 0.05, 'centro'],
+    ['Inscrição Estadual', transporta.IE || '', 0.27],
+  ]);
+  linhaTransp([
+    ['Quantidade', volumes.length ? String(somaVolumes('qVol')) : '', 0.12, 'direita'],
+    ['Espécie', textoVolumes('esp'), 0.18],
+    ['Marca', textoVolumes('marca'), 0.18],
+    ['Numeração', textoVolumes('nVol'), 0.18],
+    ['Peso Bruto', volumes.length ? moeda(somaVolumes('pesoB'), 3) : '', 0.17, 'direita'],
+    ['Peso Líquido', volumes.length ? moeda(somaVolumes('pesoL'), 3) : '', 0.17, 'direita'],
+  ]);
+  y += 2 * MM;
+
   // ---- Itens ----
   pdf.fontSize(6).font('Helvetica-Bold').fillColor('#000').text('DADOS DOS PRODUTOS / SERVIÇOS', esq, y + 1);
   y += 5 * MM;
@@ -317,7 +418,7 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
     let x = esq;
     for (const c of cols) {
       const w = larg * c.largura;
-      pdf.fontSize(5).font('Helvetica-Bold').fillColor(CINZA).text(c.titulo, x + 1, y + 3, { width: w - 2, lineBreak: false });
+      pdf.fontSize(5).font('Helvetica-Bold').fillColor(CINZA).text(c.titulo, x + 1, centroVertical(y, y + alturaLinha, 5), { width: w - 2, lineBreak: false });
       if (x > esq) pdf.moveTo(x, y).lineTo(x, y + alturaLinha).stroke();
       x += w;
     }
@@ -342,7 +443,7 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
     for (const c of cols) {
       const w = larg * c.largura;
       pdf.fontSize(5.2).font('Helvetica').fillColor('#000')
-        .text(String(c.campo(prod, icms, det.imposto) ?? ''), x + 1, y + 1.5, {
+        .text(String(c.campo(prod, icms, det.imposto) ?? ''), x + 1, centroVertical(y, y + alturaLinha, 5.2), {
           width: w - 2,
           align: (c as any).direita ? 'right' : 'left',
           lineBreak: false,
@@ -434,21 +535,22 @@ async function danfceBobina(inf: any, chave: string, xml: string, opcoes: Opcoes
   }
 
   // Lei 12.741/2012 e reforma tributária
-  if (moeda(tot.vTotTrib)) {
+  if (Number(tot.vTotTrib) > 0) {
     pdf.fontSize(5.5).text(`Tributos totais incidentes (Lei 12.741/2012): R$ ${moeda(tot.vTotTrib)}`, { width: w, align: 'right' });
   }
   const monofasico = Number(tot.vICMSMono || 0) + Number(tot.vICMSMonoReten || 0);
-  if (monofasico || moeda(tot.vICMSMonoRet)) {
+  const retidoAntes = Number(tot.vICMSMonoRet || 0);
+  if (monofasico || retidoAntes) {
     pdf.fontSize(5.5).text(
-      `ICMS monofásico R$ ${moeda(monofasico) || '0,00'}` +
-        (moeda(tot.vICMSMonoRet) ? `   retido anteriormente R$ ${moeda(tot.vICMSMonoRet)}` : ''),
+      `ICMS monofásico R$ ${moeda(monofasico)}` +
+        (retidoAntes ? `   retido anteriormente R$ ${moeda(retidoAntes)}` : ''),
       { width: w, align: 'right' },
     );
   }
   const ibscbs = inf.total?.IBSCBSTot;
   if (ibscbs) {
     pdf.fontSize(5.5).text(
-      `IBS R$ ${moeda(ibscbs.gIBS?.vIBS) || '0,00'}   CBS R$ ${moeda(ibscbs.gCBS?.vCBS) || '0,00'}`,
+      `IBS R$ ${moeda(ibscbs.gIBS?.vIBS)}   CBS R$ ${moeda(ibscbs.gCBS?.vCBS)}`,
       { width: w, align: 'right' },
     );
   }

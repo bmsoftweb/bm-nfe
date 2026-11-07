@@ -614,7 +614,7 @@ export const ConfiguracoesView: React.FC<{
         <Secao titulo="Documento Auxiliar" descricao="Aparência do DANFE e do DANFE NFC-e">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
             <Texto
-              rotulo="Logomarca (URL ou caminho)"
+              rotulo="Logomarca (URL ou caminho; PNG ou JPEG)"
               value={config.danfe.logoMarca}
               onChange={(e) => alterar('danfe', 'logoMarca', e.target.value)}
               className="lg:col-span-6"
@@ -639,7 +639,12 @@ export const ConfiguracoesView: React.FC<{
               ]}
               className="lg:col-span-3"
             />
-            <div className="lg:col-span-12 pt-2">
+            <div className="lg:col-span-12 pt-2 flex flex-col gap-3">
+              <Toggle
+                checked={config.danfe.expandirLogo}
+                onChange={(v) => alterar('danfe', 'expandirLogo', v)}
+                label="Logomarca já tem o nome e o endereço: ocupa todo o quadro do emitente, sem imprimir os dados dele"
+              />
               <Toggle
                 checked={config.danfe.imprimirHomologacao}
                 onChange={(v) => alterar('danfe', 'imprimirHomologacao', v)}
