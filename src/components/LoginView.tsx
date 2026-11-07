@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
-import { FileCheck2, LogIn, TriangleAlert } from 'lucide-react';
+import { AlertCircle, ArrowRight, Building2, Eye, EyeOff, FileCheck2, Lock, User } from 'lucide-react';
 import { Emitente, Usuario } from '../types';
 import { entrar } from '../services/api';
-import { INPUT_CLASS_LG, LABEL_CLASS } from '../utils/formStyles';
+import { INPUT_CLASS_LG } from '../utils/formStyles';
 import { ThemeToggle } from './ThemeToggle';
 import { ThemeMode } from '../utils/theme';
 import { Toggle } from './Toggle';
-import { lerLembrete, limparLembrete, salvarLembrete } from '../utils/session';
+import { Confirmacao } from './ui';
+import { lerLembrete, limparLembrete, limparSessao, salvarLembrete } from '../utils/session';
 import { formatarCnpj } from '../utils/formatters';
+
+/** Versão do package.json, injetada pelo vite.config.ts */
+declare const __APP_VERSION__: string;
 
 interface LoginViewProps {
   tema: ThemeMode;
@@ -16,15 +20,26 @@ interface LoginViewProps {
   onEntrou: (usuario: Usuario, empresa: Emitente, token: string, lembrar: boolean) => void;
 }
 
-export const LoginView: React.FC<LoginViewProps> = ({ tema, onAlternarTema, avisoInicial, onEntrou }) => {
-  const lembrete = lerLembrete();
+const ROTULO = 'block text-[10px] font-bold uppercase tracking-widest ml-1 mb-1.5 text-stone-400 dark:text-stone-500';
+const ICONE_CAMPO = 'absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400 dark:text-stone-500 pointer-events-none';
+const selecionar = (e: React.FocusEvent<HTMLInputElement>) => e.target.select();
 
-  const [cnpj, setCnpj] = useState(lembrete ? formatarCnpj(lembrete.cnpj) : '');
-  const [usuario, setUsuario] = useState(lembrete?.usuario || '');
+export const LoginView: React.FC<LoginViewProps> = ({ tema, onAlternarTema, avisoInicial, onEntrou }) => {
+  // Um lembrete salvo pré-preenche CNPJ e usuário e já deixa a opção marcada
+  const [lembrete] = useState(() => lerLembrete());
+  const [cnpj, setCnpj] = useState(() => (lembrete ? formatarCnpj(lembrete.cnpj) : ''));
+  const [usuario, setUsuario] = useState(() => lembrete?.usuario || '');
   const [senha, setSenha] = useState('');
-  const [lembrar, setLembrar] = useState(!!lembrete);
+  const [mostrarSenha, setMostrarSenha] = useState(false);
+  const [lembrar, setLembrar] = useState(() => !!lembrete);
+  /** Há CNPJ/usuário guardados neste navegador */
+  const [temDados, setTemDados] = useState(() => !!lembrete);
+  const [limpando, setLimpando] = useState(false);
   const [erro, setErro] = useState<string | null>(avisoInicial || null);
   const [enviando, setEnviando] = useState(false);
+
+  // O foco abre no primeiro campo ainda vazio
+  const [foco] = useState(() => (!cnpj ? 'cnpj' : !usuario ? 'usuario' : 'senha'));
 
   const submeter = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,92 +52,227 @@ export const LoginView: React.FC<LoginViewProps> = ({ tema, onAlternarTema, avis
 
       if (lembrar) salvarLembrete({ cnpj: cnpjLimpo, usuario });
       else limparLembrete();
+      setTemDados(lembrar);
 
       onEntrou(resposta.usuario, resposta.empresa, resposta.token, lembrar);
     } catch (err: any) {
-      setErro(err.message || 'Não foi possível entrar.');
+      setErro(err.message || 'Não foi possível validar o acesso. Tente novamente.');
     } finally {
       setEnviando(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-stone-100/70 dark:bg-stone-950 flex items-center justify-center p-4 font-sans antialiased">
-      <div className="absolute top-4 right-4">
-        <ThemeToggle theme={tema} onToggle={onAlternarTema} variant="login" />
+  /** Marca: ícone + nome, usada no painel esquerdo e, no celular, acima do formulário */
+  const marca = (
+    <div className="flex items-center gap-2.5">
+      <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200/50 dark:shadow-none shrink-0">
+        <FileCheck2 className="w-5 h-5 text-white" />
       </div>
+      <span className="text-sm font-black tracking-wider text-stone-800 dark:text-stone-100">BMNFe</span>
+    </div>
+  );
 
-      <form
-        onSubmit={submeter}
-        className="w-full max-w-sm bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800
-          rounded-2xl shadow-xl p-6 flex flex-col gap-4"
-      >
-        <div className="flex flex-col items-center gap-2 mb-2">
-          <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40">
-            <FileCheck2 className="w-7 h-7 text-blue-600 dark:text-blue-400" />
-          </div>
-          <h1 className="text-lg font-bold text-stone-800 dark:text-stone-100">BMNFe</h1>
-          <p className="text-xs text-stone-500 dark:text-stone-400 text-center">
-            Emissão, consulta e eventos de NF-e e NFC-e
+  return (
+    <div className="min-h-screen flex relative bg-white dark:bg-stone-900 text-stone-900 dark:text-white font-sans antialiased">
+      {/* Painel esquerdo: identidade visual (oculto em telas pequenas) */}
+      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden flex-col p-12 bg-white dark:bg-stone-950 isolate">
+        {/* Pano de fundo: DANFE com a chave em código de barras e o selo de autorizada */}
+        <div className="absolute inset-0 -z-10 pointer-events-none overflow-hidden">
+          <svg
+            viewBox="0 0 380 470"
+            aria-hidden="true"
+            className="absolute top-1/2 right-[6%] -translate-y-1/2 w-[min(440px,70%)] text-indigo-200 dark:text-indigo-400/25"
+          >
+            {/* Nota de trás, inclinada */}
+            <rect x="40" y="40" width="230" height="330" rx="16" fill="currentColor" opacity=".3" transform="rotate(-7 155 205)" />
+            {/* DANFE */}
+            <g fill="currentColor">
+              <rect x="80" y="50" width="230" height="340" rx="16" opacity=".45" />
+              <rect x="104" y="76" width="86" height="36" rx="6" opacity=".9" />
+              <rect x="204" y="80" width="82" height="8" rx="4" opacity=".7" />
+              <rect x="204" y="96" width="60" height="8" rx="4" opacity=".7" />
+              {[180, 200, 220, 240, 260].map((y, i) => (
+                <rect key={y} x="104" y={y} width={[182, 150, 170, 128, 160][i]} height="8" rx="4" opacity=".6" />
+              ))}
+              <rect x="196" y="300" width="90" height="28" rx="6" opacity=".9" />
+            </g>
+            {/* Chave de acesso em código de barras: o tracejado da linha faz as barras */}
+            <line x1="104" y1="143" x2="286" y2="143" stroke="currentColor" strokeWidth="30" strokeDasharray="3 2 1 2 4 3 2 2 1 3 3 2 1 2 2 3 4 2 1 2" />
+            {/* Autorizada */}
+            <circle cx="300" cy="372" r="40" fill="currentColor" />
+            <path d="M282 372 l12 12 l24 -25" fill="none" stroke="white" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" className="dark:stroke-stone-950" />
+          </svg>
+          <div className="absolute top-[15%] left-[10%] w-[280px] h-[280px] rounded-[40%] rotate-12 blur-3xl bg-indigo-100/70 dark:bg-indigo-500/10" />
+          <div className="absolute bottom-[10%] right-[5%] w-[220px] h-[220px] rounded-[45%] -rotate-12 blur-2xl bg-blue-100/60 dark:bg-blue-500/10" />
+        </div>
+
+        {marca}
+
+        <div className="flex-1 flex flex-col justify-center">
+          <h1 className="text-6xl font-black leading-[0.95] tracking-tight text-stone-900 dark:text-white">NF-e</h1>
+          <p className="mt-4 text-sm font-medium max-w-xs text-stone-500 dark:text-stone-400">
+            Emissão, consulta e eventos de NF-e e NFC-e em um só lugar.
           </p>
         </div>
+      </div>
 
-        {erro && (
-          <div className="flex items-start gap-2 text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl p-3">
-            <TriangleAlert className="w-4 h-4 shrink-0 mt-px" />
-            <span>{erro}</span>
+      {/* Painel direito: formulário de login */}
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 relative bg-stone-50 dark:bg-stone-900">
+        <div className="absolute top-6 right-6 z-20">
+          <ThemeToggle theme={tema} onToggle={onAlternarTema} variant="login" />
+        </div>
+
+        <div className="w-full max-w-md">
+          {/* Marca no celular (o painel esquerdo fica oculto) */}
+          <div className="flex lg:hidden mb-8">{marca}</div>
+
+          <h2 className="text-3xl font-black tracking-tight text-stone-900 dark:text-white">Login</h2>
+          <p className="text-sm font-medium mt-1.5 text-stone-500 dark:text-stone-400">
+            Informe o CNPJ do emitente, o seu usuário e a senha. No primeiro acesso, a senha digitada passa a ser a sua.
+          </p>
+
+          <form onSubmit={submeter} className="flex flex-col gap-5 mt-8">
+            {erro && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 flex items-start gap-2.5 text-xs font-bold text-rose-700 dark:text-rose-300">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                <span>{erro}</span>
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="login-cnpj" className={ROTULO}>CNPJ do emitente</label>
+              <div className="relative">
+                <Building2 className={ICONE_CAMPO} />
+                <input
+                  id="login-cnpj"
+                  required
+                  autoFocus={foco === 'cnpj'}
+                  onFocus={selecionar}
+                  inputMode="numeric"
+                  placeholder="00.000.000/0000-00"
+                  value={cnpj}
+                  onChange={(e) => {
+                    setCnpj(formatarCnpj(e.target.value.replace(/\D/g, '').slice(0, 14)) || e.target.value);
+                    setErro(null);
+                  }}
+                  className={`${INPUT_CLASS_LG} w-full pl-11`}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="login-usuario" className={ROTULO}>Usuário</label>
+              <div className="relative">
+                <User className={ICONE_CAMPO} />
+                <input
+                  id="login-usuario"
+                  required
+                  autoFocus={foco === 'usuario'}
+                  onFocus={selecionar}
+                  autoComplete="username"
+                  value={usuario}
+                  onChange={(e) => {
+                    setUsuario(e.target.value);
+                    setErro(null);
+                  }}
+                  className={`${INPUT_CLASS_LG} w-full pl-11`}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="login-senha" className={ROTULO}>Senha</label>
+              <div className="relative">
+                <Lock className={ICONE_CAMPO} />
+                <input
+                  id="login-senha"
+                  type={mostrarSenha ? 'text' : 'password'}
+                  required
+                  autoFocus={foco === 'senha'}
+                  onFocus={selecionar}
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  value={senha}
+                  onChange={(e) => {
+                    setSenha(e.target.value);
+                    setErro(null);
+                  }}
+                  className={`${INPUT_CLASS_LG} w-full pl-11 pr-10`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setMostrarSenha(!mostrarSenha)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-pointer"
+                  tabIndex={-1}
+                  title={mostrarSenha ? 'Esconder a senha' : 'Mostrar a senha'}
+                >
+                  {mostrarSenha ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 py-1">
+              <Toggle
+                id="login-lembrar"
+                checked={lembrar}
+                onChange={setLembrar}
+                size="sm"
+                label={<span className="text-xs font-bold uppercase tracking-wider text-stone-500 dark:text-stone-400">Lembrar neste dispositivo</span>}
+                title="Mantém a sessão ativa ao fechar o navegador e já traz o CNPJ e o usuário preenchidos no próximo acesso."
+              />
+              {temDados && (
+                <button
+                  type="button"
+                  onClick={() => setLimpando(true)}
+                  title="Apaga o CNPJ, o usuário e a sessão guardados neste navegador"
+                  className="text-xs font-bold text-stone-500 hover:text-rose-600 dark:text-stone-400 dark:hover:text-rose-400 cursor-pointer shrink-0"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+
+            <button
+              id="btn-login-submit"
+              type="submit"
+              disabled={enviando}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-indigo-200 dark:shadow-none transition-all flex items-center justify-center gap-2 mt-2 group disabled:opacity-70 cursor-pointer"
+            >
+              {enviando ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <>
+                  <span className="uppercase tracking-wide">Entrar</span>
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="flex items-center justify-between mt-8 pt-4 border-t border-stone-200 dark:border-stone-800 text-[10px] font-bold uppercase tracking-wider text-stone-400 dark:text-stone-500">
+            <span>BMNFe by BMsoft Sistemas</span>
+            <span className="normal-case">v{__APP_VERSION__} • © {new Date().getFullYear()}</span>
           </div>
-        )}
-
-        <div className="flex flex-col gap-1">
-          <label className={LABEL_CLASS} htmlFor="login-cnpj">CNPJ do emitente</label>
-          <input
-            id="login-cnpj"
-            required
-            autoFocus
-            inputMode="numeric"
-            placeholder="00.000.000/0000-00"
-            value={cnpj}
-            onChange={(e) => setCnpj(formatarCnpj(e.target.value.replace(/\D/g, '').slice(0, 14)) || e.target.value)}
-            className={`${INPUT_CLASS_LG} w-full`}
-          />
         </div>
+      </div>
 
-        <div className="flex flex-col gap-1">
-          <label className={LABEL_CLASS} htmlFor="login-usuario">Usuário ou e-mail</label>
-          <input
-            id="login-usuario"
-            required
-            value={usuario}
-            onChange={(e) => setUsuario(e.target.value)}
-            className={`${INPUT_CLASS_LG} w-full`}
-          />
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className={LABEL_CLASS} htmlFor="login-senha">Senha</label>
-          <input
-            id="login-senha"
-            type="password"
-            required
-            value={senha}
-            onChange={(e) => setSenha(e.target.value)}
-            className={`${INPUT_CLASS_LG} w-full`}
-          />
-        </div>
-
-        <Toggle checked={lembrar} onChange={setLembrar} label="Lembrar neste dispositivo" size="sm" />
-
-        <button
-          type="submit"
-          disabled={enviando}
-          className="mt-1 h-11 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700
-            text-white text-sm font-semibold transition-colors cursor-pointer disabled:opacity-60"
-        >
-          <LogIn className="w-4 h-4" />
-          {enviando ? 'Entrando…' : 'Entrar'}
-        </button>
-      </form>
+      <Confirmacao
+        aberto={limpando}
+        titulo="Limpar os dados deste dispositivo?"
+        mensagem="Apaga o CNPJ, o usuário e a sessão guardados neste navegador. Você precisará digitar tudo de novo no próximo acesso."
+        rotuloConfirmar="Limpar"
+        onConfirmar={() => {
+          limparLembrete();
+          limparSessao();
+          setCnpj('');
+          setUsuario('');
+          setSenha('');
+          setLembrar(false);
+          setTemDados(false);
+          setLimpando(false);
+        }}
+        onCancelar={() => setLimpando(false)}
+      />
     </div>
   );
 };
