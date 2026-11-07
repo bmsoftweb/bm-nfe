@@ -24,7 +24,7 @@ const SUBTITULOS: Record<string, string> = {
   eventos: 'Cancelamento, carta de correção e manifestação do destinatário',
   inutilizacao: 'Faixas de numeração que não serão utilizadas',
   distribuicao: 'Documentos emitidos contra o CNPJ, no Ambiente Nacional',
-  tabelas: 'CFOP e NCM oficiais dos combos do ERP, baixados sob pedido',
+  tabelas: 'CFOP, NCM e municípios oficiais dos combos do ERP, baixados sob pedido',
   configuracoes: 'Certificado, webservices, emitente, arquivos, DANFE e e-mail',
   log: 'Histórico de comunicação com a SEFAZ',
 };

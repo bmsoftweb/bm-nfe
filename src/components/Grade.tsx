@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Inbox, Loader2, Menu, Search, X,
+  AlertCircle, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Inbox, Loader2, Menu, Search, X,
 } from 'lucide-react';
 import { ConsultaGrade, PaginaGrade } from '../services/api';
 import { LinhasGrade, ModoLargura, lerConfigLista, salvarConfigLista } from '../utils/configListas';
@@ -651,15 +651,22 @@ export function Grade<T>({
       {totalPaginas > 1 && (
         <div className="px-4 py-2.5 border-t border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950/40 flex items-center justify-between gap-3 shrink-0">
           <span className="text-[11px] text-stone-500 dark:text-stone-400">
-            Página {pagina} de {totalPaginas}
+            Página {pagina} de {totalPaginas} ({total.toLocaleString('pt-BR')} {total === 1 ? 'registro' : 'registros'})
           </span>
           <div className="flex items-center gap-1.5">
-            <button type="button" onClick={() => setPagina((p) => Math.max(1, p - 1))} disabled={pagina <= 1} className={BOTAO_PAGINA} title="Página anterior">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button type="button" onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))} disabled={pagina >= totalPaginas} className={BOTAO_PAGINA} title="Próxima página">
-              <ChevronRight className="w-4 h-4" />
-            </button>
+            {/* Primeira, anterior, próxima e última página (como no crmWeb) */}
+            {(
+              [
+                [ChevronsLeft, 'Primeira página', 1, pagina <= 1],
+                [ChevronLeft, 'Página anterior', Math.max(1, pagina - 1), pagina <= 1],
+                [ChevronRight, 'Próxima página', Math.min(totalPaginas, pagina + 1), pagina >= totalPaginas],
+                [ChevronsRight, 'Última página', totalPaginas, pagina >= totalPaginas],
+              ] as const
+            ).map(([Icone, titulo, destino, desabilitado]) => (
+              <button key={titulo} type="button" onClick={() => setPagina(destino)} disabled={desabilitado} className={BOTAO_PAGINA} title={titulo}>
+                <Icone className="w-4 h-4" />
+              </button>
+            ))}
           </div>
         </div>
       )}

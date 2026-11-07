@@ -1,7 +1,7 @@
 /**
- * Tabelas fiscais oficiais que os módulos do ERP usam nos combos (CFOP e NCM), baixadas sob pedido pela
- * tela "Tabelas Fiscais". Ficam no banco do ERP (fis_cfop, fis_ncm), criadas pelo
- * extras/2026-11-07_tabelas_fiscais.sql: o app nunca cria tabela.
+ * Tabelas oficiais que os módulos do ERP usam nos combos (CFOP, NCM e municípios), baixadas sob pedido pela
+ * tela "Tabelas Fiscais". Ficam no banco do ERP (fis_cfop, fis_ncm e a cad_cidades do cadastro), preparadas
+ * pelos SQL de extras/: o app nunca cria nem altera tabela.
  */
 import { inflateRawSync } from 'node:zlib';
 import { pool } from './db.js';
@@ -11,25 +11,29 @@ import { dataHoraMysql } from './nfe/datas.js';
 const PORTAL_DIVERSOS = 'https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=/NJarYc9nus=';
 /** Tabela NCM vigente do Portal Único Siscomex (API pública da Classif) */
 const URL_NCM = 'https://portalunico.siscomex.gov.br/classif/api/publico/nomenclatura/download/json?perfil=PUBLICO';
+/** Municípios da API de Localidades do IBGE (o código de 7 dígitos é o cMun da NF-e) */
+const URL_MUNICIPIOS = 'https://servicodados.ibge.gov.br/api/v1/localidades/municipios?view=nivelado';
 /** O servidor do banco derruba comando que demora mais de 30 s para chegar (net_read_timeout) */
 const LOTE = 500;
 
+/** `sql`: o script de extras/ que deixa a tabela pronta (criada, ou com as colunas que a carga usa) */
 export const TABELAS = {
-  cfop: { tabela: 'fis_cfop', fonte: 'Portal Nacional da NF-e (Documentos › Diversos › Tabela de CFOP)' },
-  ncm: { tabela: 'fis_ncm', fonte: 'Portal Único Siscomex (Tabela NCM vigente)' },
+  cfop: { tabela: 'fis_cfop', fonte: 'Portal Nacional da NF-e (Documentos › Diversos › Tabela de CFOP)', sql: 'extras/2026-11-07_tabelas_fiscais.sql' },
+  ncm: { tabela: 'fis_ncm', fonte: 'Portal Único Siscomex (Tabela NCM vigente)', sql: 'extras/2026-11-07_tabelas_fiscais.sql' },
+  municipios: { tabela: 'cad_cidades', fonte: 'IBGE (API de Localidades)', sql: 'extras/2026-11-07_cad_cidades.sql' },
 } as const;
 export type NomeTabela = keyof typeof TABELAS;
 
-/** Quantos códigos cada tabela tem e quando foi atualizada (null = a tabela não existe no banco) */
+/** Quantos códigos cada tabela tem e quando foi atualizada (existe: false = tabela ou coluna faltando no banco) */
 export async function situacaoTabelas() {
   const lista = [];
-  for (const [nome, { tabela, fonte }] of Object.entries(TABELAS)) {
+  for (const [nome, { tabela, fonte, sql }] of Object.entries(TABELAS)) {
     try {
       const [[l]] = await pool.query<any[]>(`SELECT COUNT(*) AS total, MAX(atualizado_em) AS atualizadoEm FROM ${tabela}`);
-      lista.push({ nome, tabela, fonte, existe: true, total: Number(l.total), atualizadoEm: l.atualizadoEm });
+      lista.push({ nome, tabela, fonte, sql, existe: true, total: Number(l.total), atualizadoEm: l.atualizadoEm });
     } catch (err: any) {
-      if (err.code !== 'ER_NO_SUCH_TABLE') throw err;
-      lista.push({ nome, tabela, fonte, existe: false, total: 0, atualizadoEm: null });
+      if (err.code !== 'ER_NO_SUCH_TABLE' && err.code !== 'ER_BAD_FIELD_ERROR') throw err;
+      lista.push({ nome, tabela, fonte, sql, existe: false, total: 0, atualizadoEm: null });
     }
   }
   return lista;
@@ -38,11 +42,13 @@ export async function situacaoTabelas() {
 export async function atualizarTabela(nome: string): Promise<{ total: number; versao: string }> {
   if (nome === 'cfop') return atualizarCfop();
   if (nome === 'ncm') return atualizarNcm();
+  if (nome === 'municipios') return atualizarMunicipios();
   throw new Error(`Tabela "${nome}" desconhecida.`);
 }
 
 /** Grava em lotes numa transação só: ou a tabela inteira entra, ou nada muda */
-async function gravar(tabela: string, apagarAntes: boolean, sql: string, linhas: unknown[][]) {
+async function gravar(nome: NomeTabela, apagarAntes: boolean, sql: string, linhas: unknown[][]) {
+  const { tabela, sql: script } = TABELAS[nome];
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -51,8 +57,8 @@ async function gravar(tabela: string, apagarAntes: boolean, sql: string, linhas:
     await conn.commit();
   } catch (err: any) {
     await conn.rollback();
-    throw err.code === 'ER_NO_SUCH_TABLE'
-      ? new Error(`Falta criar a tabela ${tabela} no banco: rode o extras/2026-11-07_tabelas_fiscais.sql.`)
+    throw err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR'
+      ? new Error(`A tabela ${tabela} não está pronta no banco: rode o ${script}.`)
       : err;
   } finally {
     conn.release();
@@ -113,7 +119,7 @@ async function atualizarCfop() {
     .join(', ');
   // Código revogado continua na planilha (com o fim da vigência): atualizar basta, nada sai
   await gravar(
-    'fis_cfop',
+    'cfop',
     false,
     `INSERT INTO fis_cfop (cfop, titulo, descricao, inicio_vigencia, fim_vigencia, ${campos}, criado_em, atualizado_em)
      VALUES ? ON DUPLICATE KEY UPDATE ${atualiza}`,
@@ -220,10 +226,33 @@ async function atualizarNcm() {
 
   // Troca a tabela inteira: NCM extinto sai
   await gravar(
-    'fis_ncm',
+    'ncm',
     true,
     'INSERT INTO fis_ncm (ncm, nome, descricao, inicio_vigencia, fim_vigencia, ato_legal, criado_em, atualizado_em) VALUES ?',
     linhas,
   );
   return { total: linhas.length, versao: `${json.Data_Ultima_Atualizacao_NCM}, ${json.Ato}` };
+}
+
+// ---------------------------------------------------------------------------
+// Municípios: a cad_cidades do cadastro do ERP (cad_pessoas e cad_pessoas_enderecos apontam para ela)
+// ---------------------------------------------------------------------------
+
+async function atualizarMunicipios() {
+  const lista = (await (await baixar(URL_MUNICIPIOS)).json()) as { 'municipio-id': number; 'municipio-nome': string; 'UF-sigla': string }[];
+  const agora = dataHoraMysql();
+  const linhas = lista.map((m) => [String(m['municipio-id']), m['municipio-nome'].trim(), m['UF-sigla'], agora, agora]);
+  if (linhas.length < 5000 || linhas.some(([codigo, , uf]) => !/^\d{7}$/.test(codigo) || !/^[A-Z]{2}$/.test(uf))) {
+    throw new Error(`A lista de municípios do IBGE veio incompleta ou fora do formato (${linhas.length} linhas): nada foi gravado.`);
+  }
+
+  // Pelo código IBGE (índice único): quem já existe só tem nome e UF atualizados e mantém o id, que é FK do cadastro
+  await gravar(
+    'municipios',
+    false,
+    `INSERT INTO cad_cidades (codigo_ibge, nome, uf, criado_em, atualizado_em) VALUES ?
+     ON DUPLICATE KEY UPDATE nome = VALUES(nome), uf = VALUES(uf), atualizado_em = VALUES(atualizado_em)`,
+    linhas,
+  );
+  return { total: linhas.length, versao: `IBGE, ${new Set(linhas.map((l) => l[2])).size} UFs` };
 }

@@ -758,6 +758,16 @@ export function criarRotasNFe(): Router {
     direcaoPadrao: 'asc',
   }));
 
+  r.get('/tabelas/municipios', paginada({
+    tabela: 'cad_cidades',
+    global: true,
+    colunas: 'id, codigo_ibge, nome, uf',
+    ordenaveis: { codigo_ibge: 'codigo_ibge', nome: 'nome', uf: 'uf' },
+    busca: ['codigo_ibge', 'nome', 'uf'],
+    ordemPadrao: 'codigo_ibge',
+    direcaoPadrao: 'asc',
+  }));
+
   // =========================================================================
   // Preferências das grades (usuarios.config_listas no b2b admin)
   // O usuário vem da sessão, nunca de um parâmetro do cliente.

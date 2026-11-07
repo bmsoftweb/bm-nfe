@@ -8,11 +8,11 @@ import { formatarData, formatarDataHora } from '../utils/formatters';
 
 type NomeTabela = api.SituacaoTabela['nome'];
 
-const TITULOS: Record<string, string> = { cfop: 'CFOP', ncm: 'NCM' };
-const TITULOS_ABA: Record<NomeTabela, string> = { cfop: 'Tabela de CFOP', ncm: 'Tabela NCM' };
+const TITULOS: Record<string, string> = { cfop: 'CFOP', ncm: 'NCM', municipios: 'Municípios' };
+const TITULOS_ABA: Record<NomeTabela, string> = { cfop: 'Tabela de CFOP', ncm: 'Tabela NCM', municipios: 'Tabela de Municípios' };
 
 /**
- * CFOP e NCM oficiais dos combos do ERP: só são baixados da fonte quando o usuário pede.
+ * CFOP, NCM e municípios oficiais dos combos do ERP: só são baixados da fonte quando o usuário pede.
  * O Ver abre a grade da tabela numa aba filha; a faixa de abas só aparece com alguma aberta,
  * e o X de cada filha a fecha e volta para a 1ª aba.
  */
@@ -44,12 +44,12 @@ export const TabelasView: React.FC = () => {
     return () => clearTimeout(t);
   }, [feito]);
 
-  const atualizar = async (nome: string) => {
+  const atualizar = async (nome: NomeTabela) => {
     setBaixando(nome);
     setErro(null);
     try {
       const r = await api.atualizarTabela(nome);
-      setFeito(`${TITULOS[nome]} atualizada: ${r.total.toLocaleString('pt-BR')} códigos (${r.versao}).`);
+      setFeito(`${TITULOS_ABA[nome]} atualizada: ${r.total.toLocaleString('pt-BR')} códigos (${r.versao}).`);
       await ler();
     } catch (e: any) {
       setErro(e.message);
@@ -153,7 +153,7 @@ export const TabelasView: React.FC = () => {
           >
             {!t.existe ? (
               <p className="text-xs text-amber-700 dark:text-amber-300">
-                A tabela {t.tabela} não existe no banco: rode o extras/2026-11-07_tabelas_fiscais.sql.
+                A tabela {t.tabela} não está pronta no banco: rode o {t.sql}.
               </p>
             ) : (
               <p className="text-xs text-stone-600 dark:text-stone-300">
@@ -230,10 +230,32 @@ const COLUNAS_NCM: ColunaGrade<LinhaNcm>[] = [
   { nome: 'ato_legal', rotulo: 'Ato legal', valor: (l) => l.ato_legal || '—' },
 ];
 
-/** A tabela de CFOP ou NCM gravada no banco, na grade padrão (só leitura) */
+interface LinhaMunicipio {
+  id: number;
+  codigo_ibge: string;
+  nome: string;
+  uf: string;
+}
+
+const COLUNAS_MUNICIPIOS: ColunaGrade<LinhaMunicipio>[] = [
+  { nome: 'codigo_ibge', rotulo: 'Código IBGE', valor: (l) => l.codigo_ibge },
+  { nome: 'nome', rotulo: 'Município', valor: (l) => l.nome },
+  { nome: 'uf', rotulo: 'UF', tipo: 'centro', valor: (l) => l.uf },
+];
+
+/** A tabela de CFOP, NCM ou municípios gravada no banco, na grade padrão (só leitura) */
 const GradeTabela: React.FC<{ nome: NomeTabela }> = ({ nome }) => (
   <div className="flex-1 flex flex-col min-h-0">
-    {nome === 'cfop' ? (
+    {nome === 'municipios' ? (
+      <Grade<LinhaMunicipio>
+        recurso="tabela_municipios"
+        colunas={COLUNAS_MUNICIPIOS}
+        carregarPagina={api.listarMunicipios}
+        chave={(l) => l.id}
+        ordemPadrao={{ campo: 'codigo_ibge', direcao: 'asc' }}
+        rotuloVazio="Nenhum município encontrado"
+      />
+    ) : nome === 'cfop' ? (
       <Grade<LinhaCfop>
         recurso="tabela_cfop"
         colunas={COLUNAS_CFOP}

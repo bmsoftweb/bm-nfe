@@ -199,13 +199,15 @@ export const listarDistribuicao = () => pedir<any[]>('/distribuicao');
 export const listarLog = (c: ConsultaGrade) => pedir<PaginaGrade<any>>(`/log?${paraQuery(c)}`);
 
 // ---------------------------------------------------------------------------
-// Tabelas fiscais (CFOP, NCM) dos combos do ERP
+// Tabelas fiscais (CFOP, NCM, municípios) dos combos do ERP
 // ---------------------------------------------------------------------------
 
 export interface SituacaoTabela {
-  nome: 'cfop' | 'ncm';
+  nome: 'cfop' | 'ncm' | 'municipios';
   tabela: string;
   fonte: string;
+  /** Script de extras/ que deixa a tabela pronta, quando `existe` é false */
+  sql: string;
   existe: boolean;
   total: number;
   atualizadoEm: string | null;
@@ -215,6 +217,7 @@ export const buscarTabelas = () => pedir<SituacaoTabela[]>('/tabelas');
 export const atualizarTabela = (nome: string) => post<{ total: number; versao: string }>(`/tabelas/${nome}/atualizar`);
 export const listarCfop = (c: ConsultaGrade) => pedir<PaginaGrade<any>>(`/tabelas/cfop?${paraQuery(c)}`);
 export const listarNcm = (c: ConsultaGrade) => pedir<PaginaGrade<any>>(`/tabelas/ncm?${paraQuery(c)}`);
+export const listarMunicipios = (c: ConsultaGrade) => pedir<PaginaGrade<any>>(`/tabelas/municipios?${paraQuery(c)}`);
 
 // ---------------------------------------------------------------------------
 // Preferências das grades
