@@ -14,7 +14,7 @@ import { formatarChave, formatarDataHora } from '../utils/formatters';
  * diálogo de confirmação.
  */
 export const EventosView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
-  const { retorno, erro, errosSchema, carregando, executar } = useOperacao();
+  const { retorno, erro, errosSchema, carregando, executar, fecharErro } = useOperacao();
 
   const [tipoEvento, setTipoEvento] = useState('110111');
   const [chave, setChave] = useState('');
@@ -254,7 +254,7 @@ export const EventosView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
 
       <PainelRespostas
         retorno={retorno}
-        erro={erro}
+        erro={erro} onFecharErro={fecharErro}
         errosSchema={errosSchema}
         carregando={carregando}
         resumo={[

@@ -1,10 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { CopyPlus, FileCheck2, FileInput, Mail, Pencil, Plus, Printer, Send, ShieldCheck, X } from 'lucide-react';
 import * as api from '../services/api';
-import { DocumentoLista, Emitente, Meta, ResultadoValidacao } from '../types';
-import { Botao, Confirmacao, Etiqueta, Faixa, Texto } from './ui';
+import { DocumentoLista, Emitente, Meta } from '../types';
+import { Botao, Confirmacao, Etiqueta, Texto } from './ui';
+import { AvisoErro, AvisoSucesso } from './AvisoErro';
 import { AcaoGrade, ColunaGrade, Grade } from './Grade';
-import { ListaErrosSchema, PainelRespostas, useOperacao } from './PainelRespostas';
+import { PainelRespostas, useOperacao } from './PainelRespostas';
 import { CopiaNFe, EdicaoNFe, NovaNFeView } from './NovaNFeView';
 import { AMBIENTES, SITUACOES, formatarChave, formatarDataHora, formatarMoeda } from '../utils/formatters';
 
@@ -21,7 +22,7 @@ export const DocumentosView: React.FC<{
   emitente,
   onRecarregarPainel,
 }) => {
-  const { retorno, erro, errosSchema, carregando, executar, setErro, falhar } = useOperacao();
+  const { retorno, erro, errosSchema, carregando, executar, setErro, falhar, fecharErro } = useOperacao();
 
   const [selecionado, setSelecionado] = useState<DocumentoLista | null>(null);
   /** Incrementado para a grade recarregar a página atual depois de uma ação */
@@ -31,7 +32,7 @@ export const DocumentosView: React.FC<{
   const [emailPara, setEmailPara] = useState('');
   const [enviandoEmail, setEnviandoEmail] = useState<DocumentoLista | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
-  const [resultadoSchema, setResultadoSchema] = useState<{ numero: number; resultado: ResultadoValidacao } | null>(null);
+  const [alerta, setAlerta] = useState<string | null>(null);
   const [copiaDe, setCopiaDe] = useState<CopiaNFe | null>(null);
   const [edicao, setEdicao] = useState<EdicaoNFe | null>(null);
   const arquivoRef = useRef<HTMLInputElement>(null);
@@ -98,7 +99,8 @@ export const DocumentosView: React.FC<{
     try {
       const completo = await api.buscarDocumento(doc.chave);
       const r = await api.validarAssinatura(completo.xml_protocolo || completo.xml);
-      setAviso(r.valida ? 'Assinatura digital válida.' : `Assinatura inválida: ${r.erro}`);
+      if (r.valida) setAviso('Assinatura digital válida.');
+      else setAlerta(`Assinatura inválida: ${r.erro}`);
     } catch (err: any) {
       setErro(err.message);
     }
@@ -152,14 +154,14 @@ export const DocumentosView: React.FC<{
   /** "Validar XML" do exemplo: confere contra o XSD oficial sem enviar nada */
   const validarSchema = async (doc: DocumentoLista) => {
     setErro(null);
-    setResultadoSchema(null);
     try {
       const resultado = await api.validarXml({ chave: doc.chave });
       if (resultado.valido) {
         setAviso(`NF-e nº ${doc.numero}: XML válido contra ${resultado.schema}.`);
       } else {
-        setAviso(null);
-        setResultadoSchema({ numero: doc.numero, resultado });
+        // O aviso vai para o canto e a lista dos problemas fica no painel de respostas
+        const n = resultado.erros.length;
+        falhar(Object.assign(new Error(`NF-e nº ${doc.numero}: o XML não passa no schema oficial (${n} problema${n === 1 ? '' : 's'}).`), { errosSchema: resultado.erros }));
       }
     } catch (err: any) {
       falhar(err);
@@ -207,21 +209,8 @@ export const DocumentosView: React.FC<{
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {aviso && (
-        <Faixa tom="info" onFechar={() => setAviso(null)}>
-          {aviso}
-        </Faixa>
-      )}
-
-      {resultadoSchema && (
-        <Faixa tom="erro" onFechar={() => setResultadoSchema(null)}>
-          <span className="font-semibold">
-            NF-e nº {resultadoSchema.numero}: o XML não passa no schema oficial
-            ({resultadoSchema.resultado.erros.length} problema{resultadoSchema.resultado.erros.length === 1 ? '' : 's'}).
-          </span>
-          <ListaErrosSchema erros={resultadoSchema.resultado.erros} schema={resultadoSchema.resultado.schema} />
-        </Faixa>
-      )}
+      {aviso && <AvisoSucesso mensagem={aviso} onFechar={() => setAviso(null)} />}
+      {alerta && <AvisoErro tom="alerta" mensagem={alerta} onFechar={() => setAlerta(null)} />}
 
       {/* Lista no padrão das grades do b2b admin */}
       <input
@@ -348,7 +337,7 @@ export const DocumentosView: React.FC<{
 
       <PainelRespostas
         retorno={retorno}
-        erro={erro}
+        erro={erro} onFecharErro={fecharErro}
         errosSchema={errosSchema}
         carregando={carregando}
         resumo={[

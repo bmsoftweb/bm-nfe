@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Download, Library, Table2, X } from 'lucide-react';
 import * as api from '../services/api';
 import { Botao, Etiqueta, Secao } from './ui';
-import { AvisoErro, NoCanto } from './AvisoErro';
+import { AvisoErro, AvisoSucesso } from './AvisoErro';
 import { ColunaGrade, Grade } from './Grade';
 import { formatarData, formatarDataHora } from '../utils/formatters';
 
@@ -38,11 +38,6 @@ export const TabelasView: React.FC = () => {
     ler();
   }, []);
 
-  useEffect(() => {
-    if (!feito) return;
-    const t = setTimeout(() => setFeito(null), 6000);
-    return () => clearTimeout(t);
-  }, [feito]);
 
   const atualizar = async (nome: NomeTabela) => {
     setBaixando(nome);
@@ -61,14 +56,7 @@ export const TabelasView: React.FC = () => {
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {erro && <AvisoErro mensagem={erro} onFechar={() => setErro(null)} />}
-      {feito && (
-        <NoCanto>
-          <div className="pointer-events-auto bg-stone-900 text-white text-xs font-semibold py-3 px-4 rounded-xl shadow-2xl border border-stone-800 flex items-center gap-2.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-            <span>{feito}</span>
-          </div>
-        </NoCanto>
-      )}
+      {feito && <AvisoSucesso mensagem={feito} onFechar={() => setFeito(null)} />}
 
       {abertas.length > 0 && (
         <div className="flex items-stretch bg-stone-100 dark:bg-stone-950 border-b border-stone-200 dark:border-stone-800 overflow-x-auto overflow-y-hidden shrink-0">

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertCircle, ArrowRight, Building2, Eye, EyeOff, FileCheck2, Lock, User } from 'lucide-react';
+import { ArrowRight, Building2, Eye, EyeOff, FileCheck2, Lock, User } from 'lucide-react';
 import { Emitente, Usuario } from '../types';
 import { entrar } from '../services/api';
 import { INPUT_CLASS_LG } from '../utils/formStyles';
@@ -7,6 +7,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { ThemeMode } from '../utils/theme';
 import { Toggle } from './Toggle';
 import { Confirmacao } from './ui';
+import { AvisoErro } from './AvisoErro';
 import { lerLembrete, limparLembrete, limparSessao, salvarLembrete } from '../utils/session';
 import { formatarCnpj } from '../utils/formatters';
 
@@ -132,12 +133,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ tema, onAlternarTema, avis
           </p>
 
           <form onSubmit={submeter} className="flex flex-col gap-5 mt-8">
-            {erro && (
-              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 flex items-start gap-2.5 text-xs font-bold text-rose-700 dark:text-rose-300">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
-                <span>{erro}</span>
-              </div>
-            )}
+            {erro && <AvisoErro mensagem={erro} onFechar={() => setErro(null)} />}
 
             <div>
               <label htmlFor="login-cnpj" className={ROTULO}>CNPJ do emitente</label>

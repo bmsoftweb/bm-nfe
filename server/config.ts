@@ -68,8 +68,6 @@ export interface ConfigDanfe {
   logoMarca: string;
   /** A logomarca já traz nome e endereço: ocupa o quadro inteiro e os dados do emitente não são impressos */
   expandirLogo: boolean;
-  /** 0=Retrato, 1=Paisagem */
-  tipoDanfe: number;
   /** 0=Bobina 80mm, 1=A4 */
   tipoDanfce: number;
   /** Imprime o DANFE também em homologação, com a tarja de "sem valor fiscal" */
@@ -147,7 +145,6 @@ export const CONFIG_PADRAO: ConfigNFe = {
   danfe: {
     logoMarca: '',
     expandirLogo: false,
-    tipoDanfe: 0,
     tipoDanfce: 1,
     imprimirHomologacao: true,
   },

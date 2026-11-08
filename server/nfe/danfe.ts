@@ -4,13 +4,15 @@
  * O exemplo Delphi delega para o FortesReport (ACBrNFeDANFeRL); aqui o desenho é
  * feito direto, seguindo o Manual de Integração: o mesmo conjunto de quadros
  * obrigatórios, canhoto, código de barras CODE128C da chave e tabela de itens.
- * Para a NFC-e sai o DANFE simplificado em bobina, com o QR-Code.
+ * O formato do modelo 55 segue o tpImp (retrato, paisagem ou DANFE simplificado);
+ * para a NFC-e sai o DANFE NFC-e em bobina, com o QR-Code.
  */
 import fs from 'node:fs/promises';
 import PDFDocument from 'pdfkit';
 import bwipjs from 'bwip-js/node';
 import { lerXml, valorTag } from './xml.js';
 import { paraBR } from './datas.js';
+import { situacaoPeloStatus } from './concentrador.js';
 
 const MM = 2.834645669; // 1 mm em pontos
 const CINZA = '#444444';
@@ -85,7 +87,8 @@ export interface OpcoesDanfe {
   expandirLogo?: boolean;
   /** Imprime a tarja de homologação */
   homologacao?: boolean;
-  paisagem?: boolean;
+  /** Formato atual da série (1 retrato, 2 paisagem, 3 simplificado); sem ele vale o tpImp do XML */
+  formato?: number;
 }
 
 /**
@@ -100,19 +103,20 @@ export async function gerarDanfe(xml: string, opcoes: OpcoesDanfe = {}): Promise
   const chave = String(inf['@Id'] || '').replace(/\D/g, '');
   const modelo = String(inf.ide?.mod || '55');
 
-  return modelo === '65'
-    ? danfceBobina(inf, chave, xml, opcoes)
-    : danfeRetrato(inf, chave, xml, opcoes);
+  if (modelo === '65') return danfceBobina(inf, chave, xml, opcoes);
+  // Formato atual da série ou, sem ele, o tpImp gravado na emissão: 1 retrato, 2 paisagem, 3 simplificado
+  const tpImp = String(opcoes.formato ?? inf.ide?.tpImp ?? '1');
+  return tpImp === '3' ? danfeSimplificado(inf, chave, xml, opcoes) : danfeRetrato(inf, chave, xml, opcoes, tpImp === '2');
 }
 
 // ---------------------------------------------------------------------------
 // DANFE modelo 55
 // ---------------------------------------------------------------------------
 
-async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: OpcoesDanfe): Promise<Buffer> {
+async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: OpcoesDanfe, paisagem: boolean): Promise<Buffer> {
   const pdf = new PDFDocument({
     size: 'A4',
-    layout: opcoes.paisagem ? 'landscape' : 'portrait',
+    layout: paisagem ? 'landscape' : 'portrait',
     margin: 5 * MM,
     info: { Title: `DANFE ${inf.ide?.nNF || ''}`, Author: inf.emit?.xNome || '' },
   });
@@ -438,20 +442,29 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
     // O ICMS vem dentro de um grupo variável (ICMS00, ICMSSN102, ...)
     const icms = Object.values(det.imposto?.ICMS || {})[0] as any;
 
-    quadro(esq, y, larg, alturaLinha);
+    // A descrição quebra em quantas linhas precisar e a linha do item cresce junto;
+    // as outras colunas ficam na altura da primeira linha da descrição
+    pdf.fontSize(5.2).font('Helvetica');
+    const larguraDescricao = larg * cols[1].largura - 2;
+    const descricao = String(prod.xProd ?? '');
+    const altura = alturaLinha + pdf.heightOfString(descricao, { width: larguraDescricao }) - pdf.heightOfString('X', { width: larguraDescricao });
+    const topoTexto = centroVertical(y, y + alturaLinha, 5.2);
+
+    quadro(esq, y, larg, altura);
     let x = esq;
     for (const c of cols) {
       const w = larg * c.largura;
+      const quebra = c === cols[1];
       pdf.fontSize(5.2).font('Helvetica').fillColor('#000')
-        .text(String(c.campo(prod, icms, det.imposto) ?? ''), x + 1, centroVertical(y, y + alturaLinha, 5.2), {
+        .text(String(c.campo(prod, icms, det.imposto) ?? ''), x + 1, topoTexto, {
           width: w - 2,
           align: (c as any).direita ? 'right' : 'left',
-          lineBreak: false,
+          lineBreak: quebra,
         });
-      if (x > esq) pdf.moveTo(x, y).lineTo(x, y + alturaLinha).stroke();
+      if (x > esq) pdf.moveTo(x, y).lineTo(x, y + altura).stroke();
       x += w;
     }
-    y += alturaLinha;
+    y += altura;
   }
 
   y += 2 * MM;
@@ -487,6 +500,218 @@ async function danfeRetrato(inf: any, chave: string, xml: string, opcoes: Opcoes
 
   pdf.end();
   return pronto;
+}
+
+// ---------------------------------------------------------------------------
+// DANFE Simplificado (tpImp 3): faixa de 80 mm com os blocos do
+// ACBrNFeDANFeRLSimplificado — chave e protocolo, emitente, número/série,
+// destinatário, itens, totais, duplicatas, tributos e dados adicionais.
+// ---------------------------------------------------------------------------
+
+async function danfeSimplificado(inf: any, chave: string, xml: string, opcoes: OpcoesDanfe): Promise<Buffer> {
+  const largura = 80 * MM;
+  const margem = 3 * MM;
+  const barras = await codigoDeBarras(chave, 90, 10).catch(() => null);
+  const logo = await carregarLogo(opcoes.logo);
+
+  // A faixa tem a altura do conteúdo: a 1ª passada só mede, a 2ª desenha na página do tamanho certo
+  const rascunho = new PDFDocument({ size: [largura, 3000 * MM], margin: margem });
+  const fim = desenharSimplificado(rascunho, inf, chave, xml, opcoes, barras, logo);
+  rascunho.end();
+
+  const pdf = new PDFDocument({
+    size: [largura, fim + margem + 2],
+    margin: margem,
+    info: { Title: `DANFE ${inf.ide?.nNF || ''}`, Author: inf.emit?.xNome || '' },
+  });
+  const pedacos: Buffer[] = [];
+  pdf.on('data', (d) => pedacos.push(d));
+  const pronto = new Promise<Buffer>((resolve) => pdf.on('end', () => resolve(Buffer.concat(pedacos))));
+  desenharSimplificado(pdf, inf, chave, xml, opcoes, barras, logo);
+  pdf.end();
+  return pronto;
+}
+
+/** Desenha a faixa e devolve onde ela termina */
+function desenharSimplificado(
+  pdf: PDFKit.PDFDocument, inf: any, chave: string, xml: string, opcoes: OpcoesDanfe,
+  barras: Buffer | null, logo: Buffer | null,
+): number {
+  const esq = pdf.page.margins.left;
+  const w = pdf.page.width - esq - pdf.page.margins.right;
+  let y = pdf.page.margins.top;
+
+  const texto = (s: string, o: { tamanho?: number; negrito?: boolean; alinhar?: 'left' | 'center' | 'right'; cor?: string } = {}) => {
+    pdf.fontSize(o.tamanho ?? 7).font(o.negrito ? 'Helvetica-Bold' : 'Helvetica').fillColor(o.cor ?? '#000')
+      .text(s, esq, y, { width: w, align: o.alinhar ?? 'left' });
+    y = pdf.y;
+  };
+  const separador = () => {
+    y += 3;
+    pdf.lineWidth(LINHA).strokeColor(CINZA).moveTo(esq, y).lineTo(esq + w, y).stroke();
+    y += 3;
+  };
+  /** Uma linha de colunas fixas: [texto, fração da largura, alinhamento] */
+  const colunas = (cols: [string, number, ('left' | 'right' | 'center')?][], tamanho = 6.5, negrito = false) => {
+    pdf.fontSize(tamanho).font(negrito ? 'Helvetica-Bold' : 'Helvetica').fillColor('#000');
+    let x = esq;
+    for (const [s, fracao, alinhar] of cols) {
+      pdf.text(s, x, y, { width: w * fracao - 2, align: alinhar ?? 'left', lineBreak: false });
+      x += w * fracao;
+    }
+    y += pdf.currentLineHeight(true) + 1;
+  };
+
+  // ---- Chave de acesso e protocolo ----
+  texto('DANFE Simplificado da NF-e', { tamanho: 9, negrito: true, alinhar: 'center' });
+  y += 2;
+  texto('CHAVE DE ACESSO', { tamanho: 6.5, negrito: true, alinhar: 'center' });
+  texto(chaveFormatada(chave), { tamanho: 7, alinhar: 'center' });
+  y += 2;
+  if (barras) {
+    pdf.image(barras, esq + w * 0.05, y, { width: w * 0.9, height: 11 * MM });
+    y += 11 * MM + 2;
+  }
+  const cStat = Number(valorTag(xml, 'cStat'));
+  const protocolo = valorTag(xml, 'nProt');
+  const situacao = cStat ? situacaoPeloStatus(cStat) : null;
+  texto(
+    situacao === 'cancelada' ? 'Protocolo de Homologação de Cancelamento'
+      : situacao === 'denegada' ? 'Protocolo de Denegação de Uso'
+      : 'Protocolo de Autorização',
+    { tamanho: 6.5, negrito: true, alinhar: 'center' },
+  );
+  texto(protocolo ? `${protocolo} - ${paraBR(valorTag(xml, 'dhRecbto'))}` : 'NÃO AUTORIZADA', { alinhar: 'center' });
+
+  // ---- Emitente ----
+  separador();
+  const expandir = !!opcoes.expandirLogo;
+  let comLogo = false;
+  if (logo) {
+    const alto = expandir ? 28 * MM : 16 * MM;
+    try {
+      pdf.image(logo, esq, y, { fit: [w, alto], align: 'center', valign: 'center' });
+      y += alto + 2;
+      comLogo = true;
+    } catch {
+      // Não é PNG nem JPEG: sai só o texto
+    }
+  }
+  // A logomarca expandida já traz nome e endereço
+  if (!(comLogo && expandir)) {
+    const emit = inf.emit || {};
+    const ender = emit.enderEmit || {};
+    texto(emit.xNome || '', { tamanho: 8, negrito: true, alinhar: 'center' });
+    texto(
+      [ender.xLgr, ender.nro, ender.xCpl, ender.xBairro].filter(Boolean).join(', ') + ` - ${ender.xMun || ''}/${ender.UF || ''}`,
+      { tamanho: 6.5, alinhar: 'center' },
+    );
+    texto(`CNPJ: ${emit.CNPJ || emit.CPF || ''}   IE: ${emit.IE || ''}`, { tamanho: 6.5, alinhar: 'center' });
+  }
+
+  // ---- Dados gerais ----
+  separador();
+  const tpEmis = String(inf.ide?.tpEmis ?? '1');
+  texto(tpEmis === '1' ? 'EMISSÃO NORMAL' : 'EMISSÃO EM CONTINGÊNCIA', { tamanho: 8, negrito: true, alinhar: 'center' });
+  y += 2;
+  // Quadrinho com o tipo da operação, como no DANFE: 0 entrada, 1 saída
+  const lado = 5 * MM;
+  const legenda = '0 - ENTRADA / 1 - SAÍDA';
+  pdf.fontSize(6.5).font('Helvetica');
+  const xCaixa = esq + (w - lado - 3 - pdf.widthOfString(legenda)) / 2;
+  pdf.lineWidth(LINHA).strokeColor(CINZA).roundedRect(xCaixa, y, lado, lado, 1).stroke();
+  pdf.fontSize(9).font('Helvetica-Bold').fillColor('#000')
+    .text(String(inf.ide?.tpNF ?? ''), xCaixa, y + (lado - 9 * ALTURA_MAIUSCULA) / 2, { width: lado, align: 'center', lineBreak: false });
+  pdf.fontSize(6.5).font('Helvetica')
+    .text(legenda, xCaixa + lado + 3, y + (lado - 6.5 * ALTURA_MAIUSCULA) / 2, { lineBreak: false });
+  y += lado + 3;
+  texto(
+    `Número: ${String(inf.ide?.nNF || '').padStart(9, '0')} - Série: ${String(inf.ide?.serie ?? '').padStart(3, '0')}`,
+    { tamanho: 7.5, negrito: true, alinhar: 'center' },
+  );
+  texto(`Emissão: ${paraBR(inf.ide?.dhEmi)}`, { alinhar: 'center' });
+
+  // ---- Destinatário ----
+  separador();
+  texto('DESTINATÁRIO', { tamanho: 7.5, negrito: true, alinhar: 'center' });
+  const aviso = situacao === 'cancelada' ? 'NF-e CANCELADA'
+    : situacao === 'denegada' ? 'NF-e DENEGADA'
+    : opcoes.homologacao ? 'EMITIDA EM HOMOLOGAÇÃO - SEM VALOR FISCAL'
+    : '';
+  if (aviso) texto(aviso, { tamanho: 7, negrito: true, alinhar: 'center', cor: '#d92d20' });
+  const dest = inf.dest || {};
+  const enderDest = dest.enderDest || {};
+  if (dest.xNome) texto(dest.xNome, { tamanho: 7, negrito: true });
+  if (enderDest.xLgr) {
+    texto(
+      [enderDest.xLgr, enderDest.nro, enderDest.xCpl, enderDest.xBairro].filter(Boolean).join(', ') +
+        ` - ${enderDest.xMun || ''}/${enderDest.UF || ''}`,
+      { tamanho: 6.5 },
+    );
+  }
+  texto(`CPF/CNPJ: ${dest.CNPJ || dest.CPF || dest.idEstrangeiro || ''}   IE: ${dest.IE || ''}`, { tamanho: 6.5 });
+
+  // ---- Itens ----
+  separador();
+  colunas([['Item', 0.1], ['Código', 0.22], ['Descrição do Produto', 0.68]], 6, true);
+  colunas([['CFOP', 0.11], ['CST', 0.11], ['Qtd', 0.18, 'right'], ['Und', 0.12, 'center'], ['V.Unit. (R$)', 0.23, 'right'], ['V.Item (R$)', 0.25, 'right']], 6, true);
+  for (const det of comoLista<any>(inf.det)) {
+    const p = det.prod || {};
+    const icms = Object.values(det.imposto?.ICMS || {})[0] as any;
+    y += 1;
+    const topo = y;
+    pdf.fontSize(6.5).font('Helvetica').fillColor('#000');
+    pdf.text(String(det['@nItem'] ?? ''), esq, topo, { width: w * 0.1 - 2, lineBreak: false });
+    pdf.text(String(p.cProd ?? ''), esq + w * 0.1, topo, { width: w * 0.22 - 2, lineBreak: false, ellipsis: true });
+    pdf.text(String(p.xProd ?? ''), esq + w * 0.32, topo, { width: w * 0.68 });
+    y = Math.max(pdf.y, topo + pdf.currentLineHeight(true));
+    colunas([
+      [String(p.CFOP ?? ''), 0.11],
+      [icms ? `${icms.orig ?? ''}${icms.CST ?? icms.CSOSN ?? ''}` : '', 0.11],
+      [moeda(p.qCom, 4), 0.18, 'right'],
+      [String(p.uCom ?? ''), 0.12, 'center'],
+      [moeda(p.vUnCom), 0.23, 'right'],
+      [moeda(p.vProd), 0.25, 'right'],
+    ]);
+  }
+
+  // ---- Totais ----
+  separador();
+  const tot = inf.total?.ICMSTot || {};
+  colunas([['Qtde Total de Itens', 0.6], [String(comoLista(inf.det).length), 0.4, 'right']], 7);
+  colunas([['Desconto', 0.6], [moeda(tot.vDesc), 0.4, 'right']], 7);
+  colunas([['Valor Total', 0.6], [moeda(tot.vNF), 0.4, 'right']], 8, true);
+
+  // ---- Fatura / duplicatas ----
+  const cobr = inf.cobr || {};
+  const duplicatas = comoLista<any>(cobr.dup);
+  if (cobr.fat || duplicatas.length) {
+    separador();
+    texto('FATURA / DUPLICATAS', { tamanho: 6.5, negrito: true });
+    if (cobr.fat?.nFat) {
+      colunas([['Fatura', 0.25], [String(cobr.fat.nFat), 0.3], ['Valor líquido', 0.25], [moeda(cobr.fat.vLiq), 0.2, 'right']]);
+    }
+    for (const d of duplicatas) {
+      colunas([[String(d.nDup ?? ''), 0.3], [paraBR(d.dVenc, false), 0.35, 'center'], [moeda(d.vDup), 0.35, 'right']]);
+    }
+  }
+
+  // ---- Tributos (Lei 12.741/2012) ----
+  if (Number(tot.vTotTrib) > 0) {
+    separador();
+    const perc = Number(tot.vNF) > 0 ? (Number(tot.vTotTrib) / Number(tot.vNF)) * 100 : 0;
+    texto(`Valor aproximado dos tributos: R$ ${moeda(tot.vTotTrib)} (${moeda(perc)}%)`, { tamanho: 6.5 });
+  }
+
+  // ---- Dados adicionais ----
+  const complemento = [inf.infAdic?.infAdFisco, inf.infAdic?.infCpl].filter(Boolean).join(' | ');
+  if (complemento) {
+    separador();
+    texto('DADOS ADICIONAIS', { tamanho: 6.5, negrito: true });
+    texto(complemento, { tamanho: 6 });
+  }
+
+  return y;
 }
 
 // ---------------------------------------------------------------------------

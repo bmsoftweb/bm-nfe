@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertCircle, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Inbox, Loader2, Menu, Search, X,
+  ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Inbox, Loader2, Menu, Search, X,
 } from 'lucide-react';
 import { ConsultaGrade, PaginaGrade } from '../services/api';
 import { LinhasGrade, ModoLargura, lerConfigLista, salvarConfigLista } from '../utils/configListas';
 import { INPUT_CLASS } from '../utils/formStyles';
 import { ALTURA_CONTROLE } from './ui';
+import { AvisoErro } from './AvisoErro';
 
 /**
  * Grade no padrão das listas do b2b admin (CrudView), usada nas telas de lista.
@@ -424,12 +425,7 @@ export function Grade<T>({
         </div>
       </div>
 
-      {erro && (
-        <div className="px-4 py-2.5 border-b border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 flex items-start gap-2.5 text-xs text-red-700 dark:text-red-300 shrink-0">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{erro}</span>
-        </div>
-      )}
+      {erro && <AvisoErro mensagem={erro} onFechar={() => setErro(null)} />}
 
       {/* Grade ocupando a altura restante */}
       <div className="flex-1 overflow-auto min-h-[220px]">

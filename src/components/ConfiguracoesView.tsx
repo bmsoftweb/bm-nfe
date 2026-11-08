@@ -4,7 +4,8 @@ import {
 } from 'lucide-react';
 import * as api from '../services/api';
 import { CertificadoInfo, ConfigNFe, Emitente, Meta } from '../types';
-import { Abas, Area, Botao, Campo, Confirmacao, Faixa, Secao, Selecao, Texto } from './ui';
+import { Abas, Area, Botao, Campo, Confirmacao, Secao, Selecao, Texto } from './ui';
+import { AvisoErro, AvisoSucesso } from './AvisoErro';
 import { Toggle } from './Toggle';
 import { formatarCnpj, formatarData } from '../utils/formatters';
 
@@ -59,7 +60,6 @@ export const ConfiguracoesView: React.FC<{
       await api.gravarConfig(config);
       await api.gravarEmitente(emitente);
       setAviso('Configurações salvas.');
-      setTimeout(() => setAviso(null), 3000);
       recarregar();
       onSalvou();
     } catch (err: any) {
@@ -133,8 +133,8 @@ export const ConfiguracoesView: React.FC<{
         ]}
       />
 
-      {aviso && <Faixa tom="sucesso">{aviso}</Faixa>}
-      {erro && <Faixa tom="erro" onFechar={() => setErro(null)}>{erro}</Faixa>}
+      {aviso && <AvisoSucesso mensagem={aviso} onFechar={() => setAviso(null)} />}
+      {erro && <AvisoErro mensagem={erro} onFechar={() => setErro(null)} />}
 
       {/* ---------------- Certificado ---------------- */}
       {aba === 'certificado' && (
@@ -611,23 +611,13 @@ export const ConfiguracoesView: React.FC<{
 
       {/* ---------------- Documento Auxiliar ---------------- */}
       {aba === 'danfe' && (
-        <Secao titulo="Documento Auxiliar" descricao="Aparência do DANFE e do DANFE NFC-e">
+        <Secao titulo="Documento Auxiliar" descricao="Aparência do DANFE e do DANFE NFC-e. O formato do DANFE (retrato, paisagem ou simplificado) é o da série, no cadastro de Séries">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
             <Texto
               rotulo="Logomarca (URL ou caminho; PNG ou JPEG)"
               value={config.danfe.logoMarca}
               onChange={(e) => alterar('danfe', 'logoMarca', e.target.value)}
-              className="lg:col-span-6"
-            />
-            <Selecao
-              rotulo="DANFE (modelo 55)"
-              value={config.danfe.tipoDanfe}
-              onChange={(e) => alterar('danfe', 'tipoDanfe', Number(e.target.value))}
-              opcoes={[
-                { valor: 0, rotulo: 'Retrato' },
-                { valor: 1, rotulo: 'Paisagem' },
-              ]}
-              className="lg:col-span-3"
+              className="lg:col-span-9"
             />
             <Selecao
               rotulo="DANFE NFC-e (modelo 65)"

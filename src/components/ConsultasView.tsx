@@ -9,7 +9,7 @@ import { formatarChave } from '../utils/formatters';
 /** Aba "Consultas" do exemplo: status do serviço, chave, recibo e cadastro */
 export const ConsultasView: React.FC<{ meta: Meta | null; ufPadrao: string }> = ({ meta, ufPadrao }) => {
   const [aba, setAba] = useState('status');
-  const { retorno, erro, errosSchema, carregando, executar } = useOperacao();
+  const { retorno, erro, errosSchema, carregando, executar, fecharErro } = useOperacao();
 
   const [chave, setChave] = useState('');
   const [recibo, setRecibo] = useState('');
@@ -153,7 +153,7 @@ export const ConsultasView: React.FC<{ meta: Meta | null; ufPadrao: string }> = 
         </div>
       </Secao>
 
-      <PainelRespostas retorno={retorno} erro={erro} errosSchema={errosSchema} carregando={carregando} resumo={resumo} />
+      <PainelRespostas retorno={retorno} erro={erro} onFecharErro={fecharErro} errosSchema={errosSchema} carregando={carregando} resumo={resumo} />
     </div>
   );
 };

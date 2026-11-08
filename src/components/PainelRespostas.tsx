@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { CheckCircle2, Clipboard, Download, XCircle } from 'lucide-react';
 import { ErroApi, ErroSchema, Retorno } from '../types';
 import { Abas, Botao, Vazio } from './ui';
+import { AvisoErro } from './AvisoErro';
 
 /**
  * O painel inferior do formulário original (abas Respostas, XML Resposta, Log,
@@ -10,7 +11,9 @@ import { Abas, Botao, Vazio } from './ui';
 
 interface PainelRespostasProps {
   retorno: Retorno | null;
+  /** Erro da operação: aparece no aviso do canto */
   erro?: string | null;
+  onFecharErro?: () => void;
   /** Problemas apontados pelo XSD quando o envio foi barrado pela validação */
   errosSchema?: ErroSchema[] | null;
   carregando?: boolean;
@@ -19,7 +22,7 @@ interface PainelRespostasProps {
 }
 
 /** Lista dos problemas de schema, um por linha, com o campo em destaque */
-export const ListaErrosSchema: React.FC<{ erros: ErroSchema[]; schema?: string }> = ({ erros, schema }) => (
+const ListaErrosSchema: React.FC<{ erros: ErroSchema[] }> = ({ erros }) => (
   <div className="mt-2 flex flex-col gap-1.5">
     <ul className="flex flex-col divide-y divide-red-100 dark:divide-red-900/60 border border-red-100 dark:border-red-900/60">
       {erros.map((e, i) => (
@@ -31,9 +34,6 @@ export const ListaErrosSchema: React.FC<{ erros: ErroSchema[]; schema?: string }
         </li>
       ))}
     </ul>
-    {schema && (
-      <span className="text-[10px] text-stone-400 dark:text-stone-500">Conferido contra {schema}</span>
-    )}
   </div>
 );
 
@@ -77,7 +77,18 @@ const Bloco: React.FC<{ texto: string; nomeArquivo: string }> = ({ texto, nomeAr
   );
 };
 
-export const PainelRespostas: React.FC<PainelRespostasProps> = ({ retorno, erro, errosSchema, carregando, resumo }) => {
+export const PainelRespostas: React.FC<PainelRespostasProps> = (props) => {
+  const { erro, onFecharErro } = props;
+  return (
+    <>
+      {erro && <AvisoErro mensagem={erro} onFechar={() => onFecharErro?.()} />}
+      <Conteudo {...props} />
+    </>
+  );
+};
+
+/** O painel em si; o erro da operação fica no aviso do canto, só a lista do schema aparece aqui */
+const Conteudo: React.FC<PainelRespostasProps> = ({ retorno, errosSchema, carregando, resumo }) => {
   const [aba, setAba] = useState('respostas');
 
   if (carregando) {
@@ -88,23 +99,13 @@ export const PainelRespostas: React.FC<PainelRespostasProps> = ({ retorno, erro,
     );
   }
 
-  if (erro) {
+  if (errosSchema?.length) {
     return (
-      <div className="bg-red-50/60 dark:bg-red-950/20 border-b border-red-200 dark:border-red-900 px-4 py-3">
-        <div className="flex items-start gap-2 text-xs text-red-700 dark:text-red-300">
-          <XCircle className="w-4 h-4 shrink-0 mt-px" />
-          <div className="min-w-0 flex-1">
-            <span className="font-semibold">{erro}</span>
-            {errosSchema?.length ? (
-              <>
-                <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">
-                  O XML não passou no schema oficial, então nada foi enviado à SEFAZ.
-                </p>
-                <ListaErrosSchema erros={errosSchema} />
-              </>
-            ) : null}
-          </div>
-        </div>
+      <div className="border-b border-stone-200 dark:border-stone-800 px-4 py-3">
+        <p className="text-[11px] font-semibold text-stone-600 dark:text-stone-300">
+          O XML não passou no schema oficial, então nada foi enviado à SEFAZ. Corrija os campos abaixo:
+        </p>
+        <ListaErrosSchema erros={errosSchema} />
       </div>
     );
   }
@@ -206,5 +207,8 @@ export function useOperacao() {
     }
   };
 
-  return { retorno, erro, errosSchema, carregando, executar, setErro, falhar };
+  /** Fechar o aviso do canto: some só a mensagem, a lista do schema continua no painel */
+  const fecharErro = () => setErroTexto(null);
+
+  return { retorno, erro, errosSchema, carregando, executar, setErro, falhar, fecharErro };
 }

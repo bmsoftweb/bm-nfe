@@ -310,6 +310,8 @@ export interface DocumentoNFe {
     codigoMunicipioFG?: string;
     tipoEmissao?: number;
     codigoNumerico?: number;
+    /** tpImp do modelo 55, vindo do cadastro da série: 1=Retrato, 2=Paisagem, 3=DANFE simplificado */
+    formatoImpressao?: number;
   };
   destinatario?: Destinatario;
   itens: ItemNFe[];
@@ -1128,7 +1130,7 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
     tag('tpNF', doc.ide.tipoDocumento),
     tag('idDest', idDest),
     tag('cMunFG', doc.ide.codigoMunicipioFG || emit.codigo_municipio),
-    tag('tpImp', nfce ? 4 : cfg.danfe.tipoDanfe === 1 ? 2 : 1),
+    tag('tpImp', nfce ? 4 : [1, 2, 3].includes(Number(doc.ide.formatoImpressao)) ? Number(doc.ide.formatoImpressao) : 1),
     tag('tpEmis', tipoEmissao),
     tag('cDV', chave.slice(-1)),
     tag('tpAmb', ambiente),

@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   LayoutDashboard, FileText, Search, CalendarClock, Ban, Inbox, Settings, ScrollText,
-  LogOut, X, User, Library, type LucideIcon,
+  LogOut, X, User, Library, Hash, type LucideIcon,
 } from 'lucide-react';
 import { Usuario } from '../types';
 
@@ -20,6 +20,7 @@ export const MENU: ItemMenu[] = [
   { id: 'eventos', rotulo: 'Eventos', icone: CalendarClock, grupo: 'Operação' },
   { id: 'inutilizacao', rotulo: 'Inutilização', icone: Ban, grupo: 'Operação' },
   { id: 'distribuicao', rotulo: 'Distribuição DF-e', icone: Inbox, grupo: 'Operação' },
+  { id: 'series', rotulo: 'Séries', icone: Hash, grupo: 'Sistema' },
   { id: 'tabelas', rotulo: 'Tabelas Fiscais', icone: Library, grupo: 'Sistema' },
   { id: 'configuracoes', rotulo: 'Configurações', icone: Settings, grupo: 'Sistema' },
   { id: 'log', rotulo: 'Log de Comunicação', icone: ScrollText, grupo: 'Sistema' },
@@ -128,27 +129,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })}
       </nav>
 
-      <div className="border-t border-stone-200 dark:border-stone-800 p-3 shrink-0">
-        <div className="flex items-center gap-2.5 mb-2">
-          <div className="w-8 h-8 rounded-full bg-stone-200 dark:bg-stone-800 flex items-center justify-center shrink-0">
-            <User className="w-4 h-4 text-stone-500 dark:text-stone-400" />
+      {/* Usuário & sair: padrão do crmWeb, com o sair ao lado do usuário */}
+      <div className="p-3 border-t border-stone-200 dark:border-stone-800/80 flex items-center justify-between gap-2 bg-stone-50 dark:bg-stone-950/60 shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300 flex items-center justify-center font-semibold text-xs shrink-0">
+            {usuario?.nome ? usuario.nome.charAt(0).toUpperCase() : <User className="w-4 h-4" />}
           </div>
           <div className="min-w-0">
-            <div className="text-xs font-semibold text-stone-700 dark:text-stone-200 truncate">
-              {usuario?.nome || '—'}
+            <div className="text-xs font-semibold text-stone-900 dark:text-white truncate leading-tight">
+              {usuario?.nome || 'Usuário'}
             </div>
-            <div className="text-[10px] text-stone-500 dark:text-stone-400 truncate">{usuario?.email}</div>
+            <div className="text-[10px] text-stone-500 dark:text-stone-400 truncate mt-0.5">
+              {usuario?.cargo || usuario?.email}
+            </div>
           </div>
         </div>
         <button
           type="button"
           onClick={onSair}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold
-            text-stone-600 hover:text-red-600 hover:bg-red-50 dark:text-stone-300 dark:hover:bg-red-950/40
-            dark:hover:text-red-400 transition-colors cursor-pointer"
+          title="Encerrar sessão"
+          className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-950/50 transition-colors cursor-pointer shrink-0"
         >
           <LogOut className="w-4 h-4" />
-          Sair
         </button>
       </div>
     </>

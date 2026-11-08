@@ -16,6 +16,7 @@ import { DistribuicaoView } from './components/DistribuicaoView';
 import { ConfiguracoesView } from './components/ConfiguracoesView';
 import { LogView } from './components/LogView';
 import { TabelasView } from './components/TabelasView';
+import { SeriesView } from './components/SeriesView';
 
 const SUBTITULOS: Record<string, string> = {
   painel: 'Indicadores da emissão, certificado e últimas falhas',
@@ -24,6 +25,7 @@ const SUBTITULOS: Record<string, string> = {
   eventos: 'Cancelamento, carta de correção e manifestação do destinatário',
   inutilizacao: 'Faixas de numeração que não serão utilizadas',
   distribuicao: 'Documentos emitidos contra o CNPJ, no Ambiente Nacional',
+  series: 'Séries de emissão e o formato do DANFE de cada uma',
   tabelas: 'CFOP, NCM e municípios oficiais dos combos do ERP, baixados sob pedido',
   configuracoes: 'Certificado, webservices, emitente, arquivos, DANFE e e-mail',
   log: 'Histórico de comunicação com a SEFAZ',
@@ -177,6 +179,7 @@ export default function App() {
               <InutilizacaoView meta={meta} modeloPadrao={painel?.modelo || '55'} />
             )}
             {abaAtiva === 'distribuicao' && <DistribuicaoView meta={meta} />}
+            {abaAtiva === 'series' && <SeriesView />}
             {abaAtiva === 'tabelas' && <TabelasView />}
             {abaAtiva === 'configuracoes' && <ConfiguracoesView meta={meta} onSalvou={recarregar} />}
             {abaAtiva === 'log' && <LogView />}

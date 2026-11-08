@@ -45,6 +45,7 @@ export const DB_TABLES = [
   'nfe_distribuicao',
   'nfe_log',
   'nfe_numeracao',
+  'nfe_series',
 ];
 
 export async function checkDbHealth() {

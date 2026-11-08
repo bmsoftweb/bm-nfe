@@ -21,7 +21,7 @@ import { autorizar, consultarChave, consultarRecibo, montarProcNFe } from '../nf
 import { exigirValido, validarNFe } from '../nfe/validacao.js';
 import { dataHoraMysql } from '../nfe/datas.js';
 import { semDeclaracao, valorTag } from '../nfe/xml.js';
-import { reservarNumero } from '../nfe/numeracao.js';
+import { exigirSerie, reservarNumero } from '../nfe/numeracao.js';
 import { decidir, situacaoPeloStatus, validarReferencia } from '../nfe/concentrador.js';
 import { empresaDaRequisicao, rota } from './nfe.js';
 
@@ -112,7 +112,9 @@ async function criar(ctx: Contexto, referencia: string, documento: any): Promise
     const existente = await buscar(ctx.empresaId, referencia, con);
     if (existente) return existente;
 
-    const serie = Number(documento.ide.serie) || 1;
+    const serie = Number(documento.ide.serie ?? 1);
+    // Série fora do cadastro (ou inativa) nem reserva número
+    await exigirSerie({ empresaId: ctx.empresaId, modelo: ctx.config.geral.modeloDF, serie }, con);
     const numero = await reservarNumero({
       empresaId: ctx.empresaId, modelo: ctx.config.geral.modeloDF, serie, ambiente: ctx.config.webservice.ambiente,
     }, con);
@@ -189,7 +191,8 @@ async function gerarETransmitir(ctx: Contexto, l: Linha, documento: any, sincron
   let xml: string;
   let gerada: ReturnType<typeof gerarNFe>;
   try {
-    gerada = gerarNFe(ctx, { ...documento, ide: { ...documento.ide, serie: l.serie, numero } });
+    const formatoImpressao = await exigirSerie({ empresaId: ctx.empresaId, modelo: l.modelo, serie: l.serie });
+    gerada = gerarNFe(ctx, { ...documento, ide: { ...documento.ide, serie: l.serie, numero, formatoImpressao } });
     xml = `<?xml version="1.0" encoding="UTF-8"?>` +
       assinar(semDeclaracao(gerada.xml), 'infNFe', `NFe${gerada.chave}`, ctx.certificado);
     exigirValido(

@@ -216,6 +216,24 @@ async function principal() {
     assert.strictEqual(pdf.subarray(0, 4).toString(), '%PDF');
   });
 
+  await conferir('formato da série vira o tpImp e escolhe o DANFE (paisagem, simplificado e reimpressão)', async () => {
+    assert.ok(gerada.xml.includes('<tpImp>1</tpImp>'), 'sem formato, o padrão é retrato');
+    const tamanhoDaPagina = async (formatoImpressao: number) => {
+      const xml = gerarNFe(ctx, { ...documento, ide: { ...documento.ide, formatoImpressao } } as any).xml;
+      assert.ok(xml.includes(`<tpImp>${formatoImpressao}</tpImp>`), `tpImp devia ser ${formatoImpressao}`);
+      const pdf = (await gerarDanfe(xml)).toString('latin1');
+      return pdf.match(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/)!.slice(1).map((n) => Math.round(Number(n)));
+    };
+    const [largPaisagem, altPaisagem] = await tamanhoDaPagina(2);
+    assert.ok(largPaisagem > altPaisagem, 'paisagem devia ser A4 deitado');
+    const [largSimplificado] = await tamanhoDaPagina(3);
+    assert.strictEqual(largSimplificado, 227, 'o simplificado é a faixa de 80 mm');
+    // Reimpressão: o formato atual da série vale mais que o tpImp 1 gravado na emissão
+    const reimpressa = (await gerarDanfe(gerada.xml, { formato: 3 })).toString('latin1');
+    assert.strictEqual(Math.round(Number(reimpressa.match(/\/MediaBox \[0 0 ([\d.]+)/)![1])), 227, 'formato da série devia valer na reimpressão');
+    assert.ok(gerarNFe(contexto('65'), { ...documento, ide: { ...documento.ide, formatoImpressao: 3 } } as any).xml.includes('<tpImp>4</tpImp>'));
+  });
+
   await conferir('NFC-e ganha o bloco suplementar com QR-Code', () => {
     const nfce = gerarNFe(contexto('65'), documento as any);
     assert.ok(nfce.xml.includes('<infNFeSupl>'));

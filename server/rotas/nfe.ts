@@ -18,7 +18,7 @@ import { chaveValida } from '../nfe/chave.js';
 import { dataHoraMysql, paraBR } from '../nfe/datas.js';
 import { recortarElemento, semDeclaracao, valorTag } from '../nfe/xml.js';
 import { FalhaSchema, exigirValido, validarNFe, validarQualquer } from '../nfe/validacao.js';
-import { proximoNumero } from '../nfe/numeracao.js';
+import { exigirSerie, proximoNumero } from '../nfe/numeracao.js';
 import { atualizarTabela, situacaoTabelas } from '../tabelas.js';
 import {
   autorizar,
@@ -81,6 +81,12 @@ export function rota(handler: (req: Request, res: Response) => Promise<any>) {
             ? { success: false, error: err.aviso, errosSchema: err.erros, schema: err.schema }
             : { success: false, error: err.aviso },
         );
+        return;
+      }
+      // Tabela nova que ainda não foi criada no banco: diz o que fazer em vez do texto do MySQL
+      const tabela = err?.code === 'ER_NO_SUCH_TABLE' && String(err.sqlMessage || '').match(/\.(\w+)' doesn't exist/)?.[1];
+      if (tabela) {
+        res.status(400).json({ success: false, error: `Falta criar a tabela ${tabela} no banco: rode o script dela em extras/.` });
         return;
       }
       res.status(400).json({ success: false, error: err?.message || String(err) });
@@ -272,7 +278,10 @@ export function criarRotasNFe(): Router {
       exigirEditavel(linhas[0].situacao);
     }
 
-    const gerada = gerarNFe(ctx, documento);
+    const formatoImpressao = await exigirSerie({
+      empresaId, modelo: ctx.config.geral.modeloDF, serie: Number(documento.ide?.serie),
+    });
+    const gerada = gerarNFe(ctx, { ...documento, ide: { ...documento.ide, formatoImpressao } });
     const assinada = assinar(semDeclaracao(gerada.xml), 'infNFe', `NFe${gerada.chave}`, ctx.certificado);
     const xml = `<?xml version="1.0" encoding="UTF-8"?>${assinada}`;
 
@@ -540,13 +549,24 @@ export function criarRotasNFe(): Router {
   // =========================================================================
   // DANFE e e-mail
   // =========================================================================
-  /** Mesma impressão na tela e no anexo do e-mail: logomarca, orientação e tarja vêm da configuração */
-  const opcoesDanfe = (config: ConfigNFe, xml: string): OpcoesDanfe => ({
-    logo: config.danfe.logoMarca,
-    expandirLogo: config.danfe.expandirLogo,
-    homologacao: Number(valorTag(xml, 'tpAmb')) === 2,
-    paisagem: config.danfe.tipoDanfe === 1,
-  });
+  /**
+   * Mesma impressão na tela e no anexo do e-mail: logomarca e tarja vêm da configuração.
+   * O formato é o atual da série (como o TipoDANFE do ACBr), então a reimpressão de uma nota
+   * antiga segue o cadastro; série sem cadastro fica com o tpImp gravado no XML.
+   */
+  const opcoesDanfe = async (config: ConfigNFe, xml: string, empresaId: number): Promise<OpcoesDanfe> => {
+    const [serie] = await pool
+      .query<any[]>('SELECT formato_impressao FROM nfe_series WHERE empresa_id = ? AND modelo = ? AND serie = ?', [
+        empresaId, valorTag(xml, 'mod'), Number(valorTag(xml, 'serie')),
+      ])
+      .then(([linhas]) => linhas, () => []); // sem a tabela, imprime pelo tpImp
+    return {
+      logo: config.danfe.logoMarca,
+      expandirLogo: config.danfe.expandirLogo,
+      homologacao: Number(valorTag(xml, 'tpAmb')) === 2,
+      formato: serie ? Number(serie.formato_impressao) : undefined,
+    };
+  };
 
   r.post('/danfe', rota(async (req, res) => {
     const empresaId = empresaDaRequisicao(req);
@@ -562,7 +582,7 @@ export function criarRotasNFe(): Router {
     }
     if (!xml) throw new Error('Nenhum XML encontrado para gerar o DANFE.');
 
-    const pdf = await gerarDanfe(xml, opcoesDanfe(config, xml));
+    const pdf = await gerarDanfe(xml, await opcoesDanfe(config, xml, empresaId));
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="DANFE-${req.body?.chave || 'nfe'}.pdf"`);
@@ -586,7 +606,7 @@ export function criarRotasNFe(): Router {
     if (anexarPdf !== false) {
       anexos.push({
         nome: `${d.chave}-danfe.pdf`,
-        conteudo: (await gerarDanfe(xml, opcoesDanfe(config, xml))) as any,
+        conteudo: (await gerarDanfe(xml, await opcoesDanfe(config, xml, empresaId))) as any,
         tipo: 'application/pdf',
       });
     }
@@ -693,6 +713,98 @@ export function criarRotasNFe(): Router {
       ambiente: config.webservice.ambiente,
     });
     res.json({ numero });
+  }));
+
+  // =========================================================================
+  // Séries (a emissão só aceita série cadastrada e ativa)
+  // =========================================================================
+  r.get('/series', paginada({
+    tabela: 'nfe_series',
+    colunas: 'id, modelo, serie, descricao, formato_impressao, ativo',
+    ordenaveis: { modelo: 'modelo', serie: 'serie', descricao: 'descricao', formato_impressao: 'formato_impressao', ativo: 'ativo' },
+    busca: ['CAST(serie AS CHAR)', 'descricao'],
+    ordemPadrao: 'serie',
+    direcaoPadrao: 'asc',
+  }));
+
+  /** Séries ativas do modelo em uso: as opções da Nova NF-e */
+  r.get('/series/ativas', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const config = await lerConfig(empresaId);
+    const [linhas] = await pool.query<any[]>(
+      'SELECT serie, descricao, formato_impressao FROM nfe_series WHERE empresa_id = ? AND modelo = ? AND ativo = 1 ORDER BY serie',
+      [empresaId, config.geral.modeloDF],
+    );
+    res.json({ modelo: config.geral.modeloDF, series: linhas });
+  }));
+
+  /** Confere o formulário; o formato é o tpImp: 1 retrato, 2 paisagem, 3 simplificado (55) e 4 NFC-e (65) */
+  const dadosSerie = (b: any) => {
+    const modelo = String(b?.modelo ?? '');
+    if (modelo !== '55' && modelo !== '65') throw new Error('Modelo inválido: use 55 (NF-e) ou 65 (NFC-e).');
+    const serie = Number(b?.serie);
+    if (b?.serie === '' || !Number.isInteger(serie) || serie < 0 || serie > 999) throw new Error('A série é um número de 0 a 999.');
+    const formato = modelo === '65' ? 4 : Number(b?.formato_impressao);
+    if (![1, 2, 3, 4].includes(formato)) throw new Error('Escolha o formato de impressão: retrato, paisagem ou simplificado.');
+    return {
+      modelo,
+      serie,
+      descricao: String(b?.descricao ?? '').trim().slice(0, 60) || null,
+      formato_impressao: formato,
+      ativo: b?.ativo === false || Number(b?.ativo) === 0 ? 0 : 1,
+    };
+  };
+
+  const buscarSerie = async (id: string, empresaId: number) => {
+    const [linhas] = await pool.query<any[]>(
+      'SELECT modelo, serie FROM nfe_series WHERE id = ? AND empresa_id = ? LIMIT 1',
+      [Number(id), empresaId],
+    );
+    if (!linhas.length) throw new Error('Série não encontrada.');
+    return linhas[0] as { modelo: string; serie: number };
+  };
+
+  r.post('/series', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const s = dadosSerie(req.body);
+    try {
+      const [inserido] = await pool.query<any>(
+        `INSERT INTO nfe_series (empresa_id, modelo, serie, descricao, formato_impressao, ativo, criado_em)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [empresaId, s.modelo, s.serie, s.descricao, s.formato_impressao, s.ativo, dataHoraMysql()],
+      );
+      res.json({ success: true, id: inserido.insertId });
+    } catch (err: any) {
+      if (err?.code === 'ER_DUP_ENTRY') throw new Error(`A série ${s.serie} do modelo ${s.modelo} já está cadastrada.`);
+      throw err;
+    }
+  }));
+
+  r.put('/series/:id', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    // Modelo e número não mudam: as notas já emitidas estão presas a eles
+    const atual = await buscarSerie(req.params.id, empresaId);
+    const s = dadosSerie({ ...req.body, modelo: atual.modelo, serie: atual.serie });
+    await pool.query(
+      'UPDATE nfe_series SET descricao = ?, formato_impressao = ?, ativo = ?, atualizado_em = ? WHERE id = ? AND empresa_id = ?',
+      [s.descricao, s.formato_impressao, s.ativo, dataHoraMysql(), Number(req.params.id), empresaId],
+    );
+    res.json({ success: true });
+  }));
+
+  /** Só sai do cadastro a série que nunca teve nota; a que já teve é desativada */
+  r.delete('/series/:id', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const atual = await buscarSerie(req.params.id, empresaId);
+    const [[{ notas }]] = await pool.query<any[]>(
+      'SELECT COUNT(*) AS notas FROM nfe_documentos WHERE empresa_id = ? AND modelo = ? AND serie = ?',
+      [empresaId, atual.modelo, atual.serie],
+    );
+    if (Number(notas)) {
+      throw new Error(`A série ${atual.serie} já tem ${notas} nota(s) e não pode ser excluída. Desative-a no cadastro.`);
+    }
+    await pool.query('DELETE FROM nfe_series WHERE id = ? AND empresa_id = ?', [Number(req.params.id), empresaId]);
+    res.json({ success: true });
   }));
 
   r.get('/documentos/:chave', rota(async (req, res) => {

@@ -119,6 +119,11 @@ Resposta (igual para a primeira chamada e para as repetidas):
 }
 ```
 
+A `ide.serie` precisa estar cadastrada e ativa na tela Séries (tabela
+`nfe_series`, script `extras/2026-11-07_series.sql`); fora disso a chamada é
+recusada antes de reservar número. O formato do DANFE da série (retrato,
+paisagem ou simplificado) vai no `tpImp` do XML.
+
 `GET /api/emitir/PDV-000123` devolve a mesma resposta, sem transmitir nada: é
 como o módulo descobre o resultado depois de um timeout.
 

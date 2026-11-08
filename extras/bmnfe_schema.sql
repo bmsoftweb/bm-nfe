@@ -133,6 +133,25 @@ CREATE TABLE IF NOT EXISTS nfe_numeracao (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------------------------------------------------------------
+-- Séries: a emissão só aceita série cadastrada e ativa. formato_impressao
+-- é o tpImp do XML: 1 retrato, 2 paisagem, 3 DANFE simplificado, 4 NFC-e.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS nfe_series (
+  id                INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  empresa_id        INT UNSIGNED NOT NULL,
+  modelo            CHAR(2)      NOT NULL,
+  serie             INT          NOT NULL,
+  descricao         VARCHAR(60)  NULL,
+  formato_impressao TINYINT      NOT NULL DEFAULT 1,
+  ativo             TINYINT(1)   NOT NULL DEFAULT 1,
+  criado_em         DATETIME     NOT NULL,
+  atualizado_em     DATETIME     NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_nfe_series (empresa_id, modelo, serie),
+  CONSTRAINT fk_nfe_series_empresa FOREIGN KEY (empresa_id) REFERENCES nfe_empresas (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------
 -- Eventos (cancelamento, carta de correção, manifestação, EPEC, ...)
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS nfe_eventos (

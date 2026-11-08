@@ -16,15 +16,35 @@ export interface Serie {
 const campos = (s: Serie) => [s.empresaId, s.modelo, s.serie, s.ambiente];
 
 /** Tabela que ainda não foi criada vira uma mensagem que diz o que fazer */
-async function comTabela<T>(f: () => Promise<T>): Promise<T> {
+async function comTabela<T>(f: () => Promise<T>, tabela = 'nfe_numeracao', script = '2026-11-05_concentrador.sql'): Promise<T> {
   try {
     return await f();
   } catch (err: any) {
     if (err?.code === 'ER_NO_SUCH_TABLE') {
-      throw new Error('Falta criar a tabela nfe_numeracao: rode o extras/2026-11-05_concentrador.sql no banco.');
+      throw new Error(`Falta criar a tabela ${tabela}: rode o extras/${script} no banco.`);
     }
     throw err;
   }
+}
+
+/**
+ * A emissão só aceita série cadastrada e ativa (tela Séries). Devolve o formato do
+ * DANFE da série, que vai no tpImp: 1 retrato, 2 paisagem, 3 simplificado, 4 NFC-e.
+ */
+export async function exigirSerie(
+  s: Omit<Serie, 'ambiente'>,
+  con: Pick<PoolConnection, 'query'> = pool,
+): Promise<1 | 2 | 3 | 4> {
+  const [linhas] = await comTabela(
+    () => con.query<any[]>(
+      'SELECT formato_impressao, ativo FROM nfe_series WHERE empresa_id = ? AND modelo = ? AND serie = ?',
+      [s.empresaId, s.modelo, s.serie],
+    ),
+    'nfe_series', '2026-11-07_series.sql',
+  );
+  if (!linhas.length) throw new Error(`A série ${s.serie} do modelo ${s.modelo} não está cadastrada. Cadastre em Séries.`);
+  if (!Number(linhas[0].ativo)) throw new Error(`A série ${s.serie} do modelo ${s.modelo} está inativa. Reative em Séries ou use outra.`);
+  return Number(linhas[0].formato_impressao) as 1 | 2 | 3 | 4;
 }
 
 /** Maior número já usado na série: notas gravadas e faixas inutilizadas (cStat 102) */

@@ -9,6 +9,7 @@ import { DateField } from './DateField';
 import { PainelRespostas, useOperacao } from './PainelRespostas';
 import { formatarChave, formatarMoeda } from '../utils/formatters';
 import { TRIBUTOS_PADRAO, Tributos, TributosItem, lerTributos, montarTributos } from './TributosItem';
+import { FORMATOS } from './SeriesView';
 
 /**
  * "Criar e Enviar" do exemplo Delphi: monta a nota, gera e assina o XML e, se
@@ -126,7 +127,7 @@ export const NovaNFeView: React.FC<{
   onCancelar: () => void;
   onEmitida: () => void;
 }> = ({ meta, emitente, copiaDe, edicao, onCancelar, onEmitida }) => {
-  const { retorno, erro, errosSchema, carregando, executar, setErro, falhar } = useOperacao();
+  const { retorno, erro, errosSchema, carregando, executar, setErro, falhar, fecharErro } = useOperacao();
 
   // Calculado uma vez: a tela nasce preenchida e dali em diante o usuário edita
   const [inicial] = useState(() => valoresIniciais(edicao?.dados || copiaDe?.dados));
@@ -165,11 +166,44 @@ export const NovaNFeView: React.FC<{
   const [formaPagamento, setFormaPagamento] = useState(inicial.formaPagamento);
   const [observacoes, setObservacoes] = useState(inicial.observacoes);
 
+  // Só série cadastrada e ativa emite (cadastro de Séries); null enquanto carrega
+  const [series, setSeries] = useState<Awaited<ReturnType<typeof api.seriesAtivas>>['series'] | null>(null);
+  useEffect(() => {
+    api
+      .seriesAtivas()
+      .then((r) => {
+        setSeries(r.series);
+        // Nota nova ou cópia com série inativa ou fora do cadastro: troca pela primeira ativa
+        if (!edicao && r.series.length && !r.series.some((s) => String(s.serie) === serie)) {
+          setSerie(String(r.series[0].serie));
+        }
+      })
+      .catch((e) => {
+        // Sem a lista, a série atual fica marcada como fora do cadastro e o Gerar explica o motivo
+        setSeries([]);
+        setErro(e.message);
+      });
+  }, []);
+
   // Nota nova ou cópia: sugere o próximo número da série (o usuário pode trocar)
   useEffect(() => {
-    if (edicao || numero) return;
-    api.proximoNumero(serie).then((r) => setNumero((atual) => atual || String(r.numero))).catch(() => {});
-  }, [serie]);
+    if (edicao || numero || !series) return;
+    let vale = true;
+    api.proximoNumero(serie).then((r) => vale && setNumero((atual) => atual || String(r.numero))).catch(() => {});
+    return () => {
+      vale = false;
+    };
+  }, [serie, series]);
+
+  const opcoesSerie = (series || []).map((s) => ({
+    valor: String(s.serie),
+    rotulo: s.descricao ? `${s.serie} — ${s.descricao}` : String(s.serie),
+  }));
+  if (serie && !opcoesSerie.some((o) => o.valor === serie)) {
+    opcoesSerie.unshift({ valor: serie, rotulo: series ? `${serie} (inativa ou sem cadastro)` : serie });
+  }
+  if (!opcoesSerie.length) opcoesSerie.push({ valor: '', rotulo: 'Nenhuma série ativa' });
+  const formatoSerie = series?.find((s) => String(s.serie) === serie)?.formato_impressao;
 
   const [chaveGerada, setChaveGerada] = useState('');
   // Linha gravada pelo primeiro "Gerar" desta tela; os seguintes regravam a mesma
@@ -276,7 +310,7 @@ export const NovaNFeView: React.FC<{
     onEmitida();
   };
 
-  const valido = numero && naturezaOperacao && itens.every((i) => i.descricao && i.ncm && i.cfop);
+  const valido = serie && numero && naturezaOperacao && itens.every((i) => i.descricao && i.ncm && i.cfop);
 
   return (
     <div className="flex flex-col">
@@ -316,15 +350,26 @@ export const NovaNFeView: React.FC<{
             maxLength={60}
             value={naturezaOperacao}
             onChange={(e) => setNaturezaOperacao(e.target.value)}
-            className="lg:col-span-5"
+            className="lg:col-span-4"
           />
-          <Texto
+          <Selecao
             rotulo="Série"
             required
-            inputMode="numeric"
             value={serie}
-            onChange={(e) => setSerie(e.target.value.replace(/\D/g, ''))}
-            className="lg:col-span-1"
+            onChange={(e) => {
+              setSerie(e.target.value);
+              // Outra série, outra numeração: a sugestão é refeita
+              if (!edicao) setNumero('');
+            }}
+            opcoes={opcoesSerie}
+            dica={
+              formatoSerie
+                ? `DANFE ${FORMATOS[formatoSerie]}`
+                : series && !series.length
+                ? 'Cadastre uma série em Séries'
+                : undefined
+            }
+            className="lg:col-span-2"
           />
           <Texto
             rotulo="Número"
@@ -650,7 +695,7 @@ export const NovaNFeView: React.FC<{
 
       <PainelRespostas
         retorno={retorno}
-        erro={erro}
+        erro={erro} onFecharErro={fecharErro}
         errosSchema={errosSchema}
         carregando={carregando}
         resumo={[

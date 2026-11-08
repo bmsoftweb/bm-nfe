@@ -192,6 +192,24 @@ export const listarDocumentos = (c: ConsultaGrade) =>
   pedir<PaginaGrade<DocumentoLista>>(`/documentos?${paraQuery(c)}`);
 /** Próximo número livre da série, para já abrir a Nova NF-e numerada */
 export const proximoNumero = (serie: string) => pedir<{ numero: number }>(`/proximo-numero?serie=${encodeURIComponent(serie)}`);
+/** Cadastro de séries; formato_impressao é o tpImp (1 retrato, 2 paisagem, 3 simplificado, 4 NFC-e) */
+export interface Serie {
+  id?: number;
+  modelo: '55' | '65';
+  serie: number | '';
+  descricao: string;
+  formato_impressao: number;
+  ativo: number;
+}
+export const listarSeries = (c: ConsultaGrade) => pedir<PaginaGrade<Serie>>(`/series?${paraQuery(c)}`);
+/** Séries ativas do modelo em uso (Configurações › Geral), para a Nova NF-e */
+export const seriesAtivas = () =>
+  pedir<{ modelo: string; series: { serie: number; descricao: string | null; formato_impressao: number }[] }>('/series/ativas');
+export const gravarSerie = (s: Serie) =>
+  s.id
+    ? pedir<{ success: boolean }>(`/series/${s.id}`, { method: 'PUT', body: JSON.stringify(s) })
+    : post<{ success: boolean; id: number }>('/series', s);
+export const excluirSerie = (id: number) => pedir<{ success: boolean }>(`/series/${id}`, { method: 'DELETE' });
 export const buscarDocumento = (chave: string) => pedir<any>(`/documentos/${chave}`);
 export const listarEventos = () => pedir<any[]>('/eventos');
 export const listarInutilizacoes = () => pedir<any[]>('/inutilizacoes');
